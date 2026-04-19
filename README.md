@@ -278,6 +278,8 @@ Built with [FastMCP](https://github.com/jlowin/fastmcp). All file paths are reso
 
 - Python 3.9+
 - `fastmcp >= 3.0.0`
+- `pygame >= 2.6.1`
+- `pytmx >= 3.32`
 
 No Celeste installation required to parse, generate, or preview maps.
 
@@ -286,4 +288,3 @@ No Celeste installation required to parse, generate, or preview maps.
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
