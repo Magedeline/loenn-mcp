@@ -23,7 +23,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 requires-python = ">=3.9"
-dependencies = ["fastmcp>=3.0.0,<4"]
+dependencies = [
+    "fastmcp>=3.0.0,<4",
+    "pygame>=2.6.1",
+    "pytmx>=3.32",
+]
 
 [project.urls]
 Homepage = "https://github.com/Maggy-Studio/loenn-mcp"
