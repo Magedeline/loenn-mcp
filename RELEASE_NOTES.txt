@@ -1,3 +1,108 @@
+loenn-mcp v2.0.0
+================
+
+Celeste map editor for AI agents — now with procedural generation, seeded
+randomness strategies, pattern library extraction, and GameBanana map
+ingestion.
+
+
+WHAT'S NEW IN v2.0
+------------------
+
+4 new generation MCP tools (22 tools total):
+
+  build_pattern_library   — scan local .bin maps and extract room patterns
+                            into a reusable JSON library (PCG/patterns.json)
+
+  generate_room_from_pattern
+                          — generate a new room using patterns from the
+                            library with a chosen strategy and seed.
+                            Strategies: balanced, exploration, challenge,
+                            speedrun.
+                            Model profiles: creative, deterministic,
+                            architect.
+
+  validate_room           — check a room for playability problems (missing
+                            spawn, no floor, entity out-of-bounds, etc.)
+
+  ingest_external_map     — download maps from external URLs (.bin, .zip, or
+                            GameBanana mod pages), extract patterns into the
+                            library, and store attribution metadata.
+                            Requires confirm_download=True as an explicit
+                            opt-in; attribution string is recommended.
+
+New module:  loenn_mcp/pcg.py
+  - Room pattern extraction (size class, entity density, tile motifs, tags)
+  - Pattern library load/save/merge (JSON, deduplicated by SHA-1 hash)
+  - Seeded random.Random generation (reproducible with seed + profile)
+  - Strategy-based tile grid and entity generation
+  - Room validation helper (validate_room_structure)
+
+No new runtime dependencies — stdlib only (urllib, zipfile, hashlib, json).
+
+
+INSTALL
+-------
+  pip install loenn-mcp==2.0.0
+
+
+FULL TOOL LIST (22 tools)
+-------------------------
+  Map Reading    — list_maps, read_map_overview, read_room, get_room_tiles
+  Map Editing    — add_entity, remove_entity, set_room_tiles, add_room,
+                   remove_room, create_map
+  Entity Catalog — list_entity_definitions, get_entity_definition,
+                   list_trigger_definitions, list_effect_definitions
+  Analysis       — analyze_map, visualize_map_layout, preview_map_section
+  Rendering      — render_map_html
+  Generation     — build_pattern_library, generate_room_from_pattern,
+                   validate_room, ingest_external_map
+
+
+CONNECT TO GITHUB COPILOT (VS Code)
+-------------------------------------
+Add to .vscode/mcp.json:
+
+  {
+    "servers": {
+      "loenn-mcp": {
+        "type": "stdio",
+        "command": "python",
+        "args": ["-m", "loenn_mcp.server"],
+        "env": { "LOENN_MCP_WORKSPACE": "${workspaceFolder}" }
+      }
+    }
+  }
+
+
+CONNECT TO CLAUDE DESKTOP
+--------------------------
+Add to claude_desktop_config.json:
+
+  {
+    "mcpServers": {
+      "loenn-mcp": {
+        "command": "python",
+        "args": ["-m", "loenn_mcp.server"],
+        "env": { "LOENN_MCP_WORKSPACE": "/path/to/your/mod" }
+      }
+    }
+  }
+
+
+REQUIREMENTS
+------------
+  Python 3.9+
+  fastmcp >= 3.0.0
+
+
+LICENSE
+-------
+  MIT — https://github.com/Maggy-Studio/loenn-mcp/blob/main/LICENSE
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 loenn-mcp v1.0.0
 ================
 
@@ -70,3 +175,4 @@ REQUIREMENTS
 LICENSE
 -------
   MIT — https://github.com/Maggy-Studio/loenn-mcp/blob/main/LICENSE
+

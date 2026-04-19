@@ -11,32 +11,48 @@ Tools:
   Entity Catalog: list_entity_definitions, get_entity_definition,
                   list_trigger_definitions
   Analysis:       analyze_map, visualize_map_layout
+  Generation:     build_pattern_library, generate_room_from_pattern,
+                  validate_room, ingest_external_map
 
 Usage:
   python server.py                         (uses cwd as workspace)
   LOENN_MCP_WORKSPACE=/path python server.py  (explicit workspace)
 """
 
+import io
 import json
 import os
+import random
 import re
 import sys
+import time
+import urllib.error
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from fastmcp import FastMCP
 
 try:
     from . import celeste_bin as cb          # installed package
+    from . import pcg                        # installed package
 except ImportError:
     import celeste_bin as cb                 # run directly from source
+    import pcg                               # run directly from source
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
 mcp = FastMCP(
     "loenn-mcp",
     instructions=(
-        "Celeste / Lönn Map Editor MCP — read, edit, and analyze "
-        "Celeste .bin map files and browse Lönn entity definitions"
+        "Celeste / Lönn Map Editor MCP — read, edit, analyze, and "
+        "procedurally generate Celeste .bin map files. "
+        "Use build_pattern_library to extract room patterns from existing maps, "
+        "generate_room_from_pattern to create new rooms with a chosen strategy "
+        "(balanced/exploration/challenge/speedrun) and optional seed, "
+        "validate_room to check basic playability, and "
+        "ingest_external_map to import and attribute maps from external URLs "
+        "such as GameBanana mod downloads."
     ),
 )
 
@@ -1610,6 +1626,563 @@ drawMMViewport();
     return f"Preview saved to: {output_file}\nOpen this file in a browser to see the map.\nRooms shown: {len(rooms)}"
 
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PROCEDURAL GENERATION TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def build_pattern_library(
+    map_paths: str = "",
+    output_path: str = "PCG/patterns.json",
+    attribution: str = "",
+) -> str:
+    """Scan local .bin maps and extract room patterns into a reusable library.
+
+    The library is saved as JSON and is used by generate_room_from_pattern.
+    Run this once (or whenever you add new reference maps) to populate the
+    pattern pool.
+
+    Args:
+        map_paths: JSON array of map paths relative to the workspace, e.g.
+                   '["Maps/01_City.bin","Maps/02_Cliffs.bin"]'.
+                   Pass "" to scan every .bin file under Maps/.
+        output_path: Output JSON path (relative to workspace).
+                     Default: "PCG/patterns.json"
+        attribution: Free-text attribution / author credit stored in each
+                     extracted pattern (useful when building from mod maps).
+    """
+    out = _resolve(output_path)
+
+    # Resolve map list
+    if map_paths.strip():
+        try:
+            paths_raw = json.loads(map_paths)
+            if not isinstance(paths_raw, list):
+                return "map_paths must be a JSON array of strings."
+        except json.JSONDecodeError:
+            return f"Invalid JSON in map_paths: {map_paths}"
+        bin_files = []
+        for p in paths_raw:
+            try:
+                bin_files.append(_resolve(p))
+            except ValueError as e:
+                return str(e)
+    else:
+        maps_dir = WORKSPACE / "Maps"
+        if not maps_dir.exists():
+            return (
+                "No Maps/ directory found. Pass map_paths explicitly or "
+                "create a Maps/ folder in the workspace."
+            )
+        bin_files = sorted(maps_dir.rglob("*.bin"))
+        if not bin_files:
+            return "No .bin files found under Maps/."
+
+    library = pcg.load_library(out)
+    total_added = 0
+    skipped_files = 0
+
+    for bin_path in bin_files:
+        try:
+            data = cb.read_map(bin_path)
+            rooms = cb.get_rooms(data)
+        except Exception as exc:
+            skipped_files += 1
+            continue
+        src = str(bin_path.relative_to(WORKSPACE))
+        new_patterns = [
+            pcg.extract_pattern(r, source_info=src, attribution=attribution)
+            for r in rooms
+        ]
+        total_added += pcg.merge_patterns(library, new_patterns)
+
+    pcg.save_library(out, library)
+
+    total = len(library["patterns"])
+    rel_out = out.relative_to(WORKSPACE)
+    lines = [
+        f"Pattern library updated: {rel_out}",
+        f"Maps scanned:    {len(bin_files) - skipped_files}/{len(bin_files)}",
+        f"Patterns added:  {total_added}",
+        f"Library total:   {total} patterns",
+    ]
+    if skipped_files:
+        lines.append(f"Files skipped (parse error): {skipped_files}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def generate_room_from_pattern(
+    map_path: str,
+    room_name: str,
+    library_path: str = "PCG/patterns.json",
+    strategy: str = "balanced",
+    seed: int = -1,
+    model_profile: str = "creative",
+    x: int = 0,
+    y: int = 0,
+    width: int = 320,
+    height: int = 184,
+) -> str:
+    """Generate a new room using patterns from the library and a randomness strategy.
+
+    Picks the best matching pattern for the chosen strategy, generates a tile
+    grid and entity set with seeded randomness, then writes the room to the map.
+
+    Strategies:
+      balanced     — mix of exploration and challenge (default)
+      exploration  — open spaces, gentle platforming, few hazards
+      challenge    — complex tiles, many hazards, tight jumps
+      speedrun     — fast, linear, minimal platforms
+
+    Model profiles (control seed behaviour):
+      creative      — random seed each call; maximum variety (default)
+      deterministic — stable seed derived from strategy; same output every run
+      architect     — random seed; emphasises room shape and connectivity
+
+    Args:
+        map_path: Path to the .bin file to write the room into.
+                  The file must exist (create it with create_map first).
+        room_name: Name for the new room (lvl_ prefix added automatically).
+        library_path: Path to the pattern library JSON (default: PCG/patterns.json).
+        strategy: Generation strategy — balanced/exploration/challenge/speedrun.
+        seed: Integer seed >= 0 for reproducible output; -1 = auto.
+        model_profile: Seed-selection profile — creative/deterministic/architect.
+        x: Room X position in pixels.
+        y: Room Y position in pixels.
+        width: Room width in pixels (multiple of 8, default 320).
+        height: Room height in pixels (multiple of 8, default 184).
+    """
+    if strategy not in pcg.STRATEGIES:
+        return f"Unknown strategy '{strategy}'. Choose from: {', '.join(pcg.STRATEGIES)}"
+    if model_profile not in pcg.MODEL_PROFILES:
+        return (
+            f"Unknown model_profile '{model_profile}'. "
+            f"Choose from: {', '.join(pcg.MODEL_PROFILES)}"
+        )
+    if width % 8 != 0 or height % 8 != 0:
+        return f"width and height must be multiples of 8 (got {width}x{height})."
+    if width <= 0 or height <= 0:
+        return f"width and height must be positive (got {width}x{height})."
+
+    map_file = _resolve(map_path)
+    if not map_file.exists():
+        return (
+            f"Map file not found: {map_path}. "
+            "Create it first with create_map."
+        )
+
+    lib_file = _resolve(library_path)
+    library = pcg.load_library(lib_file)
+    patterns = library.get("patterns", [])
+
+    # Resolve seed and build RNG
+    size_class = pcg.classify_room_size(width, height)
+    actual_seed = pcg.resolve_seed(seed, strategy, model_profile)
+    rng = random.Random(actual_seed)
+
+    reference = pcg.pick_pattern(rng, patterns, strategy, size_class)
+
+    # Generate tiles and entities
+    fg_tiles = pcg.generate_tile_grid(rng, width, height, strategy, reference)
+    entity_list = pcg.generate_entities_for_room(
+        rng, width, height, strategy, reference
+    )
+
+    # Build air tile strings for bg/obj layers
+    tw, th = width // 8, height // 8
+    air_row = pcg.TILE_AIR * tw
+    air_tiles = "\n".join([air_row] * th)
+    obj_row = ",".join(["-1"] * tw)
+    obj_tiles = "\n".join([obj_row] * th)
+
+    name = room_name if room_name.startswith("lvl_") else f"lvl_{room_name}"
+
+    # Load map and check for duplicate
+    data = cb.read_map(map_file)
+    levels = cb.find_child(data, "levels")
+    if levels is None:
+        return "Invalid map: no 'levels' element."
+    for r in cb.get_rooms(data):
+        if r.get("name") == name:
+            return f"Room '{name}' already exists in {map_path}."
+
+    # Build entity elements
+    entity_children = [
+        {
+            "__name": e["__name"],
+            "__children": e.get("__children", []),
+            **{k: v for k, v in e.items() if k not in ("__name", "__children")},
+        }
+        for e in entity_list
+    ]
+
+    room: dict = {
+        "__name": "level",
+        "name": name,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "music": "",
+        "alt_music": "",
+        "ambience": "",
+        "dark": False,
+        "space": False,
+        "underwater": False,
+        "whisper": False,
+        "disableDownTransition": False,
+        "windPattern": "None",
+        "musicLayer1": True,
+        "musicLayer2": True,
+        "musicLayer3": True,
+        "musicLayer4": True,
+        "musicProgress": "",
+        "ambienceProgress": "",
+        "cameraOffsetX": 0,
+        "cameraOffsetY": 0,
+        "delayAltMusicFade": False,
+        "c": 0,
+        "__children": [
+            {
+                "__name": "solids",
+                "innerText": fg_tiles,
+                "offsetX": 0,
+                "offsetY": 0,
+                "__children": [],
+            },
+            {
+                "__name": "bg",
+                "innerText": air_tiles,
+                "offsetX": 0,
+                "offsetY": 0,
+                "__children": [],
+            },
+            {
+                "__name": "objtiles",
+                "innerText": obj_tiles,
+                "offsetX": 0,
+                "offsetY": 0,
+                "tileset": "scenery",
+                "__children": [],
+            },
+            {
+                "__name": "fgtiles",
+                "innerText": obj_tiles,
+                "offsetX": 0,
+                "offsetY": 0,
+                "tileset": "scenery",
+                "__children": [],
+            },
+            {
+                "__name": "bgtiles",
+                "innerText": obj_tiles,
+                "offsetX": 0,
+                "offsetY": 0,
+                "tileset": "scenery",
+                "__children": [],
+            },
+            {"__name": "entities", "__children": entity_children},
+            {"__name": "triggers", "__children": []},
+            {"__name": "fgdecals", "__children": []},
+            {"__name": "bgdecals", "__children": []},
+        ],
+    }
+
+    levels["__children"].append(room)
+    cb.write_map(map_file, data)
+
+    entity_summary = ", ".join(
+        f"{e['__name']}"
+        for e in entity_list
+    )
+    ref_note = (
+        f"reference pattern: {reference['id']} from {reference['source']!r}"
+        if reference
+        else "no reference pattern (library empty — generic layout used)"
+    )
+    lines = [
+        f"Generated room '{name}' in {map_path}",
+        f"  Position:  ({x}, {y})",
+        f"  Size:      {width}x{height} px ({size_class})",
+        f"  Strategy:  {strategy}",
+        f"  Profile:   {model_profile}",
+        f"  Seed:      {actual_seed}",
+        f"  Entities:  {entity_summary}",
+        f"  Ref:       {ref_note}",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def validate_room(map_path: str, room_name: str) -> str:
+    """Check a room for common playability problems.
+
+    Reports issues such as: missing player spawn, no floor tiles, entity
+    positions outside room bounds, or invalid dimensions.  An empty warning
+    list means the room passed all checks.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room name (with or without 'lvl_' prefix).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    warnings = pcg.validate_room_structure(room)
+
+    name = room.get("name", room_name)
+    w = room.get("width", 0)
+    h = room.get("height", 0)
+
+    lines = [
+        f"Validation: {name} ({w}x{h} px)",
+        f"Status: {'PASS ✓' if not warnings else f'FAIL — {len(warnings)} issue(s)'}",
+    ]
+    if warnings:
+        lines.append("")
+        lines.append("Issues found:")
+        for warn in warnings:
+            lines.append(f"  ✗ {warn}")
+    else:
+        lines.append("No issues detected.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def ingest_external_map(
+    source_url: str,
+    attribution: str = "",
+    confirm_download: bool = False,
+    tags: str = "",
+    library_path: str = "PCG/patterns.json",
+) -> str:
+    """Download a Celeste map from an external URL and extract room patterns.
+
+    Supports:
+      • Direct .bin URL — downloads the file directly.
+      • .zip URL — downloads archive and extracts all .bin files inside.
+      • GameBanana mod page URL (https://gamebanana.com/mods/XXXXX) —
+        queries the GameBanana API to find downloadable files, then
+        fetches the first .zip or .bin found.
+
+    Downloaded files are saved under PCG/Datasets/ in the workspace.
+    An attribution metadata JSON is written alongside the files.
+    Patterns are extracted and merged into the pattern library.
+
+    ⚠  Legal / compliance notice:
+      Always verify that the mod's licence permits derivative use before
+      building on its patterns.  This tool records the attribution string
+      for traceability.  GameBanana mods are covered by their authors'
+      individual licences — credit original creators in your project.
+
+    Args:
+        source_url: URL to a .bin file, .zip archive, or GameBanana mod page.
+        attribution: Author / licence credit (required for good practice).
+        confirm_download: Must be True to actually download.  Pass False to
+                          do a dry-run that shows what would happen.
+        tags: Comma-separated or JSON-array tags to apply to extracted patterns.
+        library_path: Path to the pattern library JSON (default: PCG/patterns.json).
+    """
+    if not source_url.strip():
+        return "source_url is required."
+
+    # Parse extra tags
+    extra_tags: list = []
+    if tags.strip():
+        try:
+            parsed = json.loads(tags)
+            if isinstance(parsed, list):
+                extra_tags = [str(t) for t in parsed]
+            else:
+                extra_tags = [str(parsed)]
+        except json.JSONDecodeError:
+            extra_tags = [t.strip() for t in tags.split(",") if t.strip()]
+
+    if not confirm_download:
+        return (
+            "Dry-run — no files downloaded.\n"
+            f"  Source URL:  {source_url}\n"
+            f"  Attribution: {attribution or '(none)'}\n"
+            f"  Extra tags:  {extra_tags or '(none)'}\n"
+            f"  Library:     {library_path}\n\n"
+            "To proceed, call this tool again with confirm_download=True.\n"
+            "Ensure the mod licence permits derivative use before downloading."
+        )
+
+    # ── Resolve GameBanana page URL to a direct download URL ──
+    download_url = source_url
+    gb_match = re.match(
+        r"https?://(?:www\.)?gamebanana\.com/mods/(\d+)", source_url
+    )
+    if gb_match:
+        mod_id = gb_match.group(1)
+        api_url = (
+            f"https://api.gamebanana.com/Core/Item/Data"
+            f"?itemtype=Mod&itemid={mod_id}"
+            f"&fields=name,Owner%28%29.name,Files%28%29.aFiles%28%29"
+        )
+        try:
+            req = urllib.request.Request(
+                api_url,
+                headers={"User-Agent": "loenn-mcp/2.0 (pattern-ingestion)"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                api_data = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError) as exc:
+            return f"Failed to query GameBanana API: {exc}"
+
+        # api_data is a list: [mod_name, owner_name, files_dict]
+        if not isinstance(api_data, list) or len(api_data) < 3:
+            return (
+                f"Unexpected GameBanana API response shape for mod {mod_id}.\n"
+                "Try passing the direct download URL instead."
+            )
+        mod_name = api_data[0] or f"mod-{mod_id}"
+        owner_name = api_data[1] or "unknown"
+        files_dict = api_data[2]  # {file_id: {sFile, sDownloadUrl, ...}, ...}
+
+        if not attribution:
+            attribution = f"{mod_name} by {owner_name} (GameBanana mod {mod_id})"
+
+        # Find first .zip or .bin in the files dict
+        download_url = ""
+        if isinstance(files_dict, dict):
+            for _fid, finfo in files_dict.items():
+                if not isinstance(finfo, dict):
+                    continue
+                url_candidate = finfo.get("sDownloadUrl", "")
+                fname = finfo.get("sFile", "").lower()
+                if fname.endswith(".zip") or fname.endswith(".bin"):
+                    download_url = url_candidate
+                    break
+
+        if not download_url:
+            return (
+                f"No downloadable .bin or .zip found for GameBanana mod {mod_id}.\n"
+                f"Files returned: {list(files_dict.keys()) if isinstance(files_dict, dict) else files_dict}"
+            )
+
+        time.sleep(1)  # be courteous to the GameBanana API
+
+    # ── Download the file ──
+    try:
+        req = urllib.request.Request(
+            download_url,
+            headers={"User-Agent": "loenn-mcp/2.0 (pattern-ingestion)"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw_bytes = resp.read()
+    except urllib.error.URLError as exc:
+        return f"Download failed: {exc}\nURL: {download_url}"
+
+    url_lower = download_url.lower().split("?")[0]
+
+    # ── Collect .bin file bytes ──
+    bin_files: list = []  # list of (filename, bytes)
+
+    if url_lower.endswith(".bin"):
+        fname = Path(url_lower).name or "map.bin"
+        bin_files.append((fname, raw_bytes))
+    elif url_lower.endswith(".zip"):
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                for member in zf.namelist():
+                    if member.lower().endswith(".bin"):
+                        bin_files.append((Path(member).name, zf.read(member)))
+        except zipfile.BadZipFile as exc:
+            return f"Failed to open zip archive: {exc}"
+    else:
+        # Attempt .bin parse heuristic then zip
+        if raw_bytes[:11] == b"CELESTE MAP":
+            fname = Path(url_lower).name or "map.bin"
+            bin_files.append((fname, raw_bytes))
+        else:
+            try:
+                with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                    for member in zf.namelist():
+                        if member.lower().endswith(".bin"):
+                            bin_files.append((Path(member).name, zf.read(member)))
+            except zipfile.BadZipFile:
+                return (
+                    "Could not determine file type from URL. "
+                    "Provide a direct .bin or .zip URL."
+                )
+
+    if not bin_files:
+        return "No .bin map files found in the downloaded content."
+
+    # ── Save to workspace and extract patterns ──
+    url_hash = re.sub(r"[^\w]", "_", re.sub(r"https?://", "", download_url))[:48]
+    dataset_dir = WORKSPACE / "PCG" / "Datasets" / url_hash
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+
+    # Attribution metadata
+    meta = {
+        "source_url": source_url,
+        "download_url": download_url,
+        "attribution": attribution,
+        "tags": extra_tags,
+        "files": [fname for fname, _ in bin_files],
+    }
+    (dataset_dir / "attribution.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    lib_file = _resolve(library_path)
+    library = pcg.load_library(lib_file)
+    total_added = 0
+    total_rooms = 0
+    skipped = 0
+
+    for fname, bin_bytes in bin_files:
+        save_path = dataset_dir / fname
+        save_path.write_bytes(bin_bytes)
+        try:
+            map_data = cb.read_map(save_path)
+            rooms = cb.get_rooms(map_data)
+        except Exception:
+            skipped += 1
+            continue
+        total_rooms += len(rooms)
+        new_patterns = [
+            pcg.extract_pattern(
+                r,
+                source_info=source_url,
+                attribution=attribution,
+            )
+            for r in rooms
+        ]
+        # Attach extra tags
+        if extra_tags:
+            for p in new_patterns:
+                for t in extra_tags:
+                    if t not in p["tags"]:
+                        p["tags"].append(t)
+        total_added += pcg.merge_patterns(library, new_patterns)
+
+    pcg.save_library(lib_file, library)
+
+    rel_dir = dataset_dir.relative_to(WORKSPACE)
+    lines = [
+        f"Ingested external map from: {source_url}",
+        f"  Attribution:     {attribution or '(none provided)'}",
+        f"  Saved to:        {rel_dir}/",
+        f"  .bin files:      {len(bin_files)} ({skipped} skipped)",
+        f"  Rooms processed: {total_rooms}",
+        f"  Patterns added:  {total_added}",
+        f"  Library total:   {len(library['patterns'])} patterns",
+        f"  Library path:    {library_path}",
+    ]
+    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
