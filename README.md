@@ -12,7 +12,7 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 
 ## Features
 
-### 31 MCP tools across 8 categories
+### 60 MCP tools across 18 categories
 
 **Map Reading**
 | Tool | Description |
@@ -21,6 +21,14 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 | `read_map_overview` | Summary of rooms, entities, triggers, and stylegrounds |
 | `read_room` | Full detail for a single room: tiles, entities, triggers, decals |
 | `get_room_tiles` | Raw tile grid (foreground or background) for a room |
+
+**Map Reading Extensions (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `read_map_metadata` | Quick metadata (package, room count, world bounds) without full read |
+| `search_entities` | Search entities across rooms by type, position, and room |
+| `search_triggers` | Search triggers across rooms by type |
+| `compare_rooms` | Side-by-side comparison of two rooms (size, difficulty, entities) |
 
 **Map Editing**
 | Tool | Description |
@@ -33,6 +41,23 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 | `add_room` | Create a new room with custom position/size |
 | `remove_room` | Delete a room from the map |
 | `create_map` | Create a new empty `.bin` map file |
+
+**Map Editing Extensions (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `update_entity` | Update properties of an existing entity by ID |
+| `move_entity` | Move an entity to a new position |
+| `update_room` | Update room-level properties (music, dark, wind, etc.) |
+| `clone_room` | Clone a room to a new name and position |
+| `batch_add_entities` | Add multiple entities in one call (JSON array) |
+| `resize_room` | Change room dimensions |
+
+**Decals (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `list_decals` | List all decals in a room (FG or BG) |
+| `add_decal` | Add a decal with texture, position, and scale |
+| `remove_decal` | Remove a decal by index |
 
 **Stylegrounds**
 | Tool | Description |
@@ -50,12 +75,59 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 | `list_trigger_definitions` | Browse Lönn trigger `.lua` files |
 | `list_effect_definitions` | Browse Lönn effect `.lua` files |
 
+**Catalog Extensions (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `get_trigger_definition` | Read the source of a trigger `.lua` file by name |
+| `get_effect_definition` | Read the source of an effect `.lua` file by name |
+
 **Analysis**
 | Tool | Description |
 |---|---|
 | `analyze_map` | Statistics: entity counts, type breakdown, world bounds |
 | `visualize_map_layout` | ASCII mini-map of room positions |
 | `preview_map_section` | Detailed ASCII preview of a map region |
+
+**Advanced Analysis — gdep-inspired (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `analyze_entity_usage` | Entity usage stats across the entire map |
+| `analyze_difficulty` | Estimate room/map difficulty from hazards, nav aids, tile coverage |
+| `find_entity_references` | Find all occurrences of an entity type across rooms |
+| `detect_map_patterns` | Detect design archetypes (linear, hub, collectible-rich, etc.) |
+| `analyze_room_connectivity` | Adjacency graph: isolated rooms, dead ends, hubs |
+
+**Suggestions — gdep-inspired (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `suggest_improvements` | Actionable suggestions for a room (spawns, floors, balance) |
+| `compare_maps` | Structural diff between two map files |
+
+**Wiki / Cache — gdep-inspired (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `wiki_save` | Persist analysis results locally for instant repeated queries |
+| `wiki_search` | Search cached wiki entries by key, content, or tags |
+| `wiki_list` | List all wiki entries |
+| `wiki_get` | Retrieve a specific wiki entry |
+
+**Mod Project (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `get_mod_info` | Project info: everest.yaml, map count, PCG library, wiki |
+| `validate_map` | Whole-map playability validation with optional auto-fix |
+
+**Import / Export (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `export_room_json` | Export a room as JSON for external editing or sharing |
+| `import_room_json` | Import a room from JSON into a map |
+
+**Diff & Fix — gdep-inspired (NEW in v5)**
+| Tool | Description |
+|---|---|
+| `summarize_map_diff` | Snapshot-based structural diffing for tracking map evolution |
+| `batch_validate_and_fix` | Batch playability checks with optional auto-fix |
 
 **Rendering**
 | Tool | Description |
@@ -70,7 +142,7 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 | `validate_room` | Check a room for playability issues (spawn, floor, bounds) |
 | `ingest_external_map` | Download maps from external URLs (GameBanana etc.) and extract patterns |
 
-**Image-to-Map & Terrain Generation (NEW in v4)**
+**Image-to-Map & Terrain Generation (v4)**
 | Tool | Description |
 |---|---|
 | `generate_map_from_image` | Convert a color-mapped image (PNG/JPG/BMP) into a full playable Celeste map |
@@ -365,6 +437,53 @@ preview_terrain_biomes(seed=42, width_rooms=4, height_rooms=3)
 
 ---
 
+## Game Analysis & Wiki (NEW in v5 — gdep-inspired)
+
+Advanced analysis tools adapted from game design analysis patterns.
+
+### Usage examples
+
+```python
+# Analyze difficulty across all rooms
+analyze_difficulty(map_path="Maps/MyMod/1-City.bin")
+
+# Detect gameplay patterns
+detect_map_patterns(map_path="Maps/MyMod/1-City.bin")
+# → "standard-level (7-15 rooms)", "linear-horizontal", "checkpointed (3 checkpoints)"
+
+# Get suggestions for a room
+suggest_improvements(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-01")
+
+# Track map evolution with snapshots
+summarize_map_diff(map_path="Maps/MyMod/1-City.bin")  # saves snapshot
+# ... make edits ...
+summarize_map_diff(map_path="Maps/MyMod/1-City.bin")  # shows diff
+
+# Cache analysis results for instant re-use
+wiki_save(key="city_difficulty", content="Avg difficulty 4.2/10, 3 hard rooms", tags="analysis")
+wiki_search(query="difficulty")
+
+# Batch validate and auto-fix
+batch_validate_and_fix(map_path="Maps/MyMod/1-City.bin", auto_fix=True)
+
+# Search for specific entities
+search_entities(map_path="Maps/MyMod/1-City.bin", entity_type="strawberry")
+
+# Clone and modify rooms
+clone_room(map_path="Maps/MyMod/1-City.bin", source_room="lvl_a-01", new_name="lvl_a-01-copy")
+
+# Export/import rooms as JSON
+export_room_json(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-01")
+import_room_json(map_path="Maps/MyMod/2-Resort.bin", json_path="Export/lvl_a-01.json")
+```
+
+### Wiki cache
+
+The wiki stores analysis results in `.loenn_mcp_wiki/` as JSON files.
+Results persist across sessions so repeated queries return instantly.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -412,6 +531,18 @@ Procedural map generation inspired by [AliShazly/map-generator](https://github.c
 - **Fully seeded** — same seed + parameters = identical output every time
 - **Difficulty scaling** — 1-5 scale controls hazard density, tile coverage, and platform frequency
 - **Biome-aware entities** — each biome has appropriate hazards, collectibles, and room flags
+
+### `gdep_tools.py` — game analysis tools (NEW in v5)
+
+Integrates game analysis concepts from [pirua-game/ai_game_base_analysis_cli_mcp_tool](https://github.com/pirua-game/ai_game_base_analysis_cli_mcp_tool) (gdep):
+
+- **Wiki caching** — persist analysis results locally so repeated queries are instant (`.loenn_mcp_wiki/`)
+- **Pattern detection** — detect gameplay design archetypes (linear progression, hub layouts, collectible-rich, wind corridors)
+- **Difficulty analysis** — estimate room/map difficulty from hazard density, navigation aids, tile coverage (1-10 scale)
+- **Room connectivity** — adjacency graph analysis showing isolated rooms, dead ends, and hubs
+- **Map diffing** — snapshot-based structural diffing for tracking map evolution over time
+- **Batch validation** — whole-map playability checks (spawns, floors, bounds) with optional auto-fix
+- **Suggestions** — actionable improvement suggestions based on room analysis
 
 ### `server.py` — MCP server
 

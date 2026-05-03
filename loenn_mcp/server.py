@@ -1,22 +1,34 @@
 """
 Lönn MCP Server — Celeste Map Editor for AI Agents
 
-Provides tools for reading, editing, analyzing, and generating Celeste map
+Provides 60 tools for reading, editing, analyzing, and generating Celeste map
 files (.bin) directly from VS Code via the Model Context Protocol.
 
-Tools:
-  Map Reading:    list_maps, read_map_overview, read_room, get_room_tiles
-  Map Editing:    add_entity, remove_entity, add_trigger, remove_trigger,
-                  set_room_tiles, add_room, remove_room, create_map
-  Stylegrounds:   list_stylegrounds, add_styleground, remove_styleground,
-                  update_styleground
-  Entity Catalog: list_entity_definitions, get_entity_definition,
-                  list_trigger_definitions
-  Analysis:       analyze_map, visualize_map_layout
-  Generation:     build_pattern_library, generate_room_from_pattern,
-                  validate_room, ingest_external_map
-  Image/Terrain:  generate_map_from_image, generate_terrain_map,
-                  preview_terrain_biomes
+Tools (60 across 18 categories):
+  Map Reading:      list_maps, read_map_overview, read_room, get_room_tiles
+  Map Reading Ext:  read_map_metadata, search_entities, search_triggers, compare_rooms
+  Map Editing:      add_entity, remove_entity, add_trigger, remove_trigger,
+                    set_room_tiles, add_room, remove_room, create_map
+  Map Editing Ext:  update_entity, move_entity, update_room, clone_room,
+                    batch_add_entities, resize_room
+  Decals:           list_decals, add_decal, remove_decal
+  Stylegrounds:     list_stylegrounds, add_styleground, remove_styleground,
+                    update_styleground
+  Entity Catalog:   list_entity_definitions, get_entity_definition,
+                    list_trigger_definitions
+  Catalog Ext:      get_trigger_definition, get_effect_definition
+  Analysis:         analyze_map, visualize_map_layout
+  Advanced Analysis:analyze_entity_usage, analyze_difficulty, find_entity_references,
+                    detect_map_patterns, analyze_room_connectivity
+  Suggestions:      suggest_improvements, compare_maps
+  Wiki/Cache:       wiki_save, wiki_search, wiki_list, wiki_get
+  Mod Project:      get_mod_info, validate_map
+  Import/Export:    export_room_json, import_room_json
+  Diff & Fix:       summarize_map_diff, batch_validate_and_fix
+  Generation:       build_pattern_library, generate_room_from_pattern,
+                    validate_room, ingest_external_map
+  Image/Terrain:    generate_map_from_image, generate_terrain_map,
+                    preview_terrain_biomes
 
 Usage:
   python server.py                         (uses cwd as workspace)
@@ -42,11 +54,13 @@ try:
     from . import pcg                        # installed package
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
+    from . import gdep_tools                 # installed package
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import pcg                               # run directly from source
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
+    import gdep_tools                        # run directly from source
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -2913,6 +2927,1246 @@ def preview_terrain_biomes(
         voronoi_points=voronoi_points,
         biome_set=biomes,
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP READING EXTENSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def read_map_metadata(map_path: str) -> str:
+    """Read high-level metadata from a map without listing all room contents.
+
+    Returns package name, room count, total entity/trigger counts,
+    world bounds, and style information.
+
+    Args:
+        map_path: Path to the .bin file.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    total_entities = 0
+    total_triggers = 0
+    for r in rooms:
+        for child in r.get("__children", []):
+            if child.get("__name") == "entities":
+                total_entities += len(child.get("__children", []))
+            elif child.get("__name") == "triggers":
+                total_triggers += len(child.get("__children", []))
+
+    xs = [r.get("x", 0) for r in rooms]
+    ys = [r.get("y", 0) for r in rooms]
+    max_x = max(r.get("x", 0) + r.get("width", 0) for r in rooms) if rooms else 0
+    max_y = max(r.get("y", 0) + r.get("height", 0) for r in rooms) if rooms else 0
+
+    style = cb.find_child(data, "Style")
+    fg_count = 0
+    bg_count = 0
+    if style:
+        fg = cb.find_child(style, "Foregrounds")
+        bg = cb.find_child(style, "Backgrounds")
+        fg_count = len(fg.get("__children", [])) if fg else 0
+        bg_count = len(bg.get("__children", [])) if bg else 0
+
+    lines = [
+        f"Map: {path.stem}",
+        f"  Package:       {data.get('package', '?')}",
+        f"  Rooms:         {len(rooms)}",
+        f"  Total entities:{total_entities}",
+        f"  Total triggers:{total_triggers}",
+        f"  World bounds:  ({min(xs) if xs else 0},{min(ys) if ys else 0}) to ({max_x},{max_y})",
+        f"  Stylegrounds:  {fg_count} FG, {bg_count} BG",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def search_entities(
+    map_path: str,
+    entity_type: str = "",
+    room_name: str = "",
+    min_x: int = -999999,
+    max_x: int = 999999,
+    min_y: int = -999999,
+    max_y: int = 999999,
+) -> str:
+    """Search for entities across all rooms (or a specific room) by type and/or position.
+
+    Args:
+        map_path: Path to the .bin file.
+        entity_type: Filter by entity type name (substring match). Empty = all.
+        room_name: Search only in this room. Empty = all rooms.
+        min_x: Minimum X position filter.
+        max_x: Maximum X position filter.
+        min_y: Minimum Y position filter.
+        max_y: Maximum Y position filter.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    results = []
+    for r in rooms:
+        rname = r.get("name", "?")
+        if room_name and room_name not in rname:
+            continue
+        for child in r.get("__children", []):
+            if child.get("__name") == "entities":
+                for ent in child.get("__children", []):
+                    etype = ent.get("__name", "")
+                    if entity_type and entity_type.lower() not in etype.lower():
+                        continue
+                    ex, ey = ent.get("x", 0), ent.get("y", 0)
+                    if ex < min_x or ex > max_x or ey < min_y or ey > max_y:
+                        continue
+                    results.append(
+                        f"  [{rname}] {etype} id={ent.get('id', '?')} at ({ex},{ey})"
+                    )
+
+    if not results:
+        return "No matching entities found."
+    header = f"Found {len(results)} matching entities:"
+    return "\n".join([header] + results[:200])
+
+
+@mcp.tool()
+def search_triggers(
+    map_path: str,
+    trigger_type: str = "",
+    room_name: str = "",
+) -> str:
+    """Search for triggers across all rooms by type.
+
+    Args:
+        map_path: Path to the .bin file.
+        trigger_type: Filter by trigger type (substring match). Empty = all.
+        room_name: Search only in this room. Empty = all rooms.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    results = []
+    for r in rooms:
+        rname = r.get("name", "?")
+        if room_name and room_name not in rname:
+            continue
+        for child in r.get("__children", []):
+            if child.get("__name") == "triggers":
+                for trig in child.get("__children", []):
+                    ttype = trig.get("__name", "")
+                    if trigger_type and trigger_type.lower() not in ttype.lower():
+                        continue
+                    tx, ty = trig.get("x", 0), trig.get("y", 0)
+                    tw, th = trig.get("width", 0), trig.get("height", 0)
+                    results.append(
+                        f"  [{rname}] {ttype} id={trig.get('id', '?')} "
+                        f"at ({tx},{ty}) size {tw}x{th}"
+                    )
+
+    if not results:
+        return "No matching triggers found."
+    header = f"Found {len(results)} matching triggers:"
+    return "\n".join([header] + results[:200])
+
+
+@mcp.tool()
+def compare_rooms(map_path: str, room_a: str, room_b: str) -> str:
+    """Compare two rooms in the same map side-by-side.
+
+    Shows differences in size, entity counts, tile coverage, and difficulty.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_a: First room name.
+        room_b: Second room name.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+
+    ra = cb.get_room(data, room_a)
+    rb = cb.get_room(data, room_b)
+    if ra is None:
+        return f"Room '{room_a}' not found."
+    if rb is None:
+        return f"Room '{room_b}' not found."
+
+    da = gdep_tools.analyze_difficulty_data(ra)
+    db = gdep_tools.analyze_difficulty_data(rb)
+
+    lines = [
+        f"Comparison: {room_a} vs {room_b}",
+        f"{'':15} {'Room A':>12} {'Room B':>12}",
+        f"{'Size':15} {ra.get('width',0)}x{ra.get('height',0):>6} {rb.get('width',0)}x{rb.get('height',0):>6}",
+        f"{'Entities':15} {da['total_entities']:>12} {db['total_entities']:>12}",
+        f"{'Hazards':15} {da['hazards']:>12} {db['hazards']:>12}",
+        f"{'Nav aids':15} {da['nav_aids']:>12} {db['nav_aids']:>12}",
+        f"{'Solid %':15} {da['solid_pct']:>12.1%} {db['solid_pct']:>12.1%}",
+        f"{'Difficulty':15} {da['difficulty_score']:>12}/10 {db['difficulty_score']:>12}/10",
+        f"{'Label':15} {da['difficulty_label']:>12} {db['difficulty_label']:>12}",
+    ]
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP EDITING EXTENSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def update_entity(
+    map_path: str,
+    room_name: str,
+    entity_id: int,
+    properties_json: str,
+) -> str:
+    """Update properties of an existing entity by ID.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room containing the entity.
+        entity_id: ID of the entity to update.
+        properties_json: JSON object of properties to set/update.
+                         Example: '{"x": 100, "y": 50, "width": 16}'
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    try:
+        props = json.loads(properties_json)
+        if not isinstance(props, dict):
+            return "properties_json must be a JSON object."
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    for child in room.get("__children", []):
+        if child.get("__name") == "entities":
+            for ent in child.get("__children", []):
+                if ent.get("id") == entity_id:
+                    for k, v in props.items():
+                        if k not in ("__name", "__children"):
+                            ent[k] = v
+                    cb.write_map(path, data)
+                    return f"Updated entity id={entity_id} in {room_name}: {props}"
+
+    return f"Entity id={entity_id} not found in room '{room_name}'."
+
+
+@mcp.tool()
+def move_entity(
+    map_path: str,
+    room_name: str,
+    entity_id: int,
+    x: int,
+    y: int,
+) -> str:
+    """Move an entity to a new position.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room containing the entity.
+        entity_id: ID of the entity to move.
+        x: New X position.
+        y: New Y position.
+    """
+    return update_entity(map_path, room_name, entity_id, json.dumps({"x": x, "y": y}))
+
+
+@mcp.tool()
+def update_room(
+    map_path: str,
+    room_name: str,
+    properties_json: str,
+) -> str:
+    """Update room-level properties (music, dark, wind, etc.).
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room name (with or without lvl_ prefix).
+        properties_json: JSON object of properties to update.
+                         Example: '{"dark": true, "windPattern": "Left"}'
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    try:
+        props = json.loads(properties_json)
+        if not isinstance(props, dict):
+            return "properties_json must be a JSON object."
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    protected = {"__name", "__children", "name"}
+    updated = []
+    for k, v in props.items():
+        if k in protected:
+            continue
+        room[k] = v
+        updated.append(k)
+
+    if not updated:
+        return "No valid properties to update."
+
+    cb.write_map(path, data)
+    return f"Updated room '{room_name}': {', '.join(updated)}"
+
+
+@mcp.tool()
+def clone_room(
+    map_path: str,
+    source_room: str,
+    new_name: str,
+    x: int = -1,
+    y: int = -1,
+) -> str:
+    """Clone an existing room to a new name and position.
+
+    Args:
+        map_path: Path to the .bin file.
+        source_room: Name of the room to clone.
+        new_name: Name for the cloned room.
+        x: X position for the clone (-1 = place to the right of source).
+        y: Y position for the clone (-1 = same Y as source).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, source_room)
+    if room is None:
+        return f"Room '{source_room}' not found. Available: {_room_names(data)}"
+
+    import copy
+    clone = copy.deepcopy(room)
+    name = new_name if new_name.startswith("lvl_") else f"lvl_{new_name}"
+    clone["name"] = name
+
+    if x >= 0:
+        clone["x"] = x
+    else:
+        clone["x"] = room.get("x", 0) + room.get("width", 320) + 8
+
+    if y >= 0:
+        clone["y"] = y
+
+    # Check for duplicate
+    for r in cb.get_rooms(data):
+        if r.get("name") == name:
+            return f"Room '{name}' already exists."
+
+    levels = cb.find_child(data, "levels")
+    levels["__children"].append(clone)
+    cb.write_map(path, data)
+
+    return f"Cloned '{source_room}' → '{name}' at ({clone['x']}, {clone['y']})"
+
+
+@mcp.tool()
+def batch_add_entities(
+    map_path: str,
+    room_name: str,
+    entities_json: str,
+) -> str:
+    """Add multiple entities to a room in one call.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Target room name.
+        entities_json: JSON array of entity objects.
+                       Each must have "__name". Optional: x, y, width, height, etc.
+                       IDs are auto-assigned.
+                       Example: '[{"__name":"strawberry","x":100,"y":50},
+                                  {"__name":"spring","x":200,"y":160}]'
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    try:
+        entities = json.loads(entities_json)
+        if not isinstance(entities, list):
+            return "entities_json must be a JSON array."
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    ent_el = cb.find_child(room, "entities")
+    if ent_el is None:
+        ent_el = {"__name": "entities", "__children": []}
+        room["__children"].append(ent_el)
+
+    next_id = _next_entity_id(room)
+    added = 0
+
+    for e in entities:
+        if not isinstance(e, dict) or "__name" not in e:
+            continue
+        entity = {
+            "__name": e["__name"],
+            "__children": e.get("__children", []),
+            "id": next_id,
+        }
+        for k, v in e.items():
+            if k not in ("__name", "__children", "id"):
+                entity[k] = v
+        if "x" not in entity:
+            entity["x"] = 0
+        if "y" not in entity:
+            entity["y"] = 0
+        ent_el["__children"].append(entity)
+        next_id += 1
+        added += 1
+
+    cb.write_map(path, data)
+    return f"Added {added} entities to room '{room_name}'."
+
+
+@mcp.tool()
+def resize_room(
+    map_path: str,
+    room_name: str,
+    width: int = -1,
+    height: int = -1,
+) -> str:
+    """Resize a room (updates width/height; does NOT resize tile grids).
+
+    Note: After resizing you may need to call set_room_tiles to adjust
+    the tile grid to match the new dimensions.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room to resize.
+        width: New width in pixels (must be multiple of 8, -1 = keep current).
+        height: New height in pixels (must be multiple of 8, -1 = keep current).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    changes = []
+    if width > 0:
+        if width % 8 != 0:
+            return f"Width must be multiple of 8 (got {width})."
+        room["width"] = width
+        changes.append(f"width={width}")
+    if height > 0:
+        if height % 8 != 0:
+            return f"Height must be multiple of 8 (got {height})."
+        room["height"] = height
+        changes.append(f"height={height}")
+
+    if not changes:
+        return "No changes — specify width and/or height."
+
+    cb.write_map(path, data)
+    return f"Resized '{room_name}': {', '.join(changes)}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DECALS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def list_decals(map_path: str, room_name: str, layer: str = "fg") -> str:
+    """List all decals in a room (foreground or background).
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room name.
+        layer: "fg" for foreground decals, "bg" for background decals.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    section_name = "fgdecals" if layer == "fg" else "bgdecals"
+    decals_el = cb.find_child(room, section_name)
+    if not decals_el or not decals_el.get("__children"):
+        return f"No {layer} decals in room '{room_name}'."
+
+    lines = [f"{layer.upper()} decals in {room_name} ({len(decals_el['__children'])}):\n"]
+    for i, d in enumerate(decals_el["__children"]):
+        texture = d.get("texture", "?")
+        x, y = d.get("x", 0), d.get("y", 0)
+        sx = d.get("scaleX", 1)
+        sy = d.get("scaleY", 1)
+        lines.append(f"  [{i}] {texture} at ({x},{y}) scale ({sx},{sy})")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_decal(
+    map_path: str,
+    room_name: str,
+    texture: str,
+    x: int,
+    y: int,
+    layer: str = "fg",
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+) -> str:
+    """Add a decal to a room.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Target room.
+        texture: Decal texture path (e.g. "decals/1-forsakencity/flag_a00").
+        x: X position.
+        y: Y position.
+        layer: "fg" or "bg".
+        scale_x: Horizontal scale (default 1.0).
+        scale_y: Vertical scale (default 1.0).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    section_name = "fgdecals" if layer == "fg" else "bgdecals"
+    decals_el = cb.find_child(room, section_name)
+    if decals_el is None:
+        decals_el = {"__name": section_name, "__children": []}
+        room["__children"].append(decals_el)
+
+    decal = {
+        "__name": "decal",
+        "__children": [],
+        "texture": texture,
+        "x": x,
+        "y": y,
+        "scaleX": scale_x,
+        "scaleY": scale_y,
+    }
+    decals_el["__children"].append(decal)
+    cb.write_map(path, data)
+
+    return f"Added {layer} decal '{texture}' at ({x},{y}) in room '{room_name}'."
+
+
+@mcp.tool()
+def remove_decal(
+    map_path: str,
+    room_name: str,
+    index: int,
+    layer: str = "fg",
+) -> str:
+    """Remove a decal by index.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room name.
+        index: Decal index (from list_decals output).
+        layer: "fg" or "bg".
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    section_name = "fgdecals" if layer == "fg" else "bgdecals"
+    decals_el = cb.find_child(room, section_name)
+    if not decals_el or not decals_el.get("__children"):
+        return f"No {layer} decals in room '{room_name}'."
+
+    children = decals_el["__children"]
+    if index < 0 or index >= len(children):
+        return f"Invalid index {index}. Range: 0-{len(children)-1}"
+
+    removed = children.pop(index)
+    cb.write_map(path, data)
+    return f"Removed {layer} decal '{removed.get('texture', '?')}' (index {index}) from '{room_name}'."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ADVANCED ANALYSIS (gdep-inspired)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def analyze_entity_usage(map_path: str) -> str:
+    """Analyze entity usage across the entire map.
+
+    Shows total counts, unique types, and per-room breakdown of entity usage.
+
+    Args:
+        map_path: Path to the .bin file.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    result = gdep_tools.analyze_entity_usage_data(rooms)
+
+    lines = [
+        f"Entity Usage Analysis: {path.stem}",
+        f"  Total entities: {result['total_entities']}",
+        f"  Unique types:   {result['unique_types']}",
+        "",
+        "  Type counts:",
+    ]
+    for etype, count in list(result["counts"].items())[:30]:
+        lines.append(f"    {etype:30} {count:>4}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def analyze_difficulty(map_path: str, room_name: str = "") -> str:
+    """Estimate room or map difficulty from hazard density, nav aids, and tile coverage.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Specific room to analyze. Empty = analyze all rooms.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+
+    if room_name:
+        room = cb.get_room(data, room_name)
+        if room is None:
+            return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+        d = gdep_tools.analyze_difficulty_data(room)
+        lines = [
+            f"Difficulty Analysis: {room_name}",
+            f"  Score:       {d['difficulty_score']}/10 ({d['difficulty_label']})",
+            f"  Hazards:     {d['hazards']}",
+            f"  Nav aids:    {d['nav_aids']}",
+            f"  Entities:    {d['total_entities']}",
+            f"  Solid tiles: {d['solid_pct']:.1%}",
+        ]
+        return "\n".join(lines)
+
+    # All rooms
+    rooms = cb.get_rooms(data)
+    lines = [f"Difficulty Analysis: {path.stem} ({len(rooms)} rooms)\n"]
+    lines.append(f"{'Room':25} {'Score':>6} {'Label':>12} {'Hazards':>8} {'NavAids':>8}")
+    lines.append("-" * 65)
+    total_score = 0
+    for r in rooms:
+        d = gdep_tools.analyze_difficulty_data(r)
+        total_score += d["difficulty_score"]
+        lines.append(
+            f"{r.get('name','?'):25} {d['difficulty_score']:>6}/10 "
+            f"{d['difficulty_label']:>12} {d['hazards']:>8} {d['nav_aids']:>8}"
+        )
+    avg = total_score / len(rooms) if rooms else 0
+    lines.append(f"\n  Average difficulty: {avg:.1f}/10")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def find_entity_references(map_path: str, entity_type: str) -> str:
+    """Find all occurrences of an entity type across the map.
+
+    Args:
+        map_path: Path to the .bin file.
+        entity_type: Entity type to search for (exact match).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    refs = []
+    for r in rooms:
+        rname = r.get("name", "?")
+        for child in r.get("__children", []):
+            if child.get("__name") == "entities":
+                for ent in child.get("__children", []):
+                    if ent.get("__name") == entity_type:
+                        refs.append(
+                            f"  {rname}: id={ent.get('id','?')} at ({ent.get('x',0)},{ent.get('y',0)})"
+                        )
+
+    if not refs:
+        return f"No '{entity_type}' entities found in {map_path}."
+    return f"Found {len(refs)} '{entity_type}' entities:\n" + "\n".join(refs)
+
+
+@mcp.tool()
+def detect_map_patterns(map_path: str) -> str:
+    """Detect gameplay design archetypes (linear, hub, collectible-rich, etc.).
+
+    Analyzes room layout, entity distribution, and map structure to identify
+    design patterns.
+
+    Args:
+        map_path: Path to the .bin file.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    patterns = gdep_tools.detect_map_patterns_data(rooms)
+
+    lines = [f"Design Patterns Detected: {path.stem}", ""]
+    for p in patterns:
+        lines.append(f"  • {p}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def analyze_room_connectivity(map_path: str) -> str:
+    """Analyze room adjacency graph showing isolated rooms, dead ends, and hubs.
+
+    Rooms are considered connected if they share an edge (within 8px tolerance).
+
+    Args:
+        map_path: Path to the .bin file.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    result = gdep_tools.analyze_room_connectivity_data(rooms)
+
+    lines = [
+        f"Room Connectivity: {path.stem}",
+        f"  Rooms:       {result['total_rooms']}",
+        f"  Connections: {result['total_connections']}",
+        "",
+    ]
+
+    if result["hubs"]:
+        lines.append(f"  Hubs (3+ connections): {', '.join(result['hubs'])}")
+    if result["dead_ends"]:
+        lines.append(f"  Dead ends (1 connection): {', '.join(result['dead_ends'])}")
+    if result["isolated_rooms"]:
+        lines.append(f"  Isolated (0 connections): {', '.join(result['isolated_rooms'])}")
+
+    lines.append("\n  Adjacency:")
+    for name, nbrs in result["adjacency"].items():
+        if nbrs:
+            lines.append(f"    {name} → {', '.join(nbrs)}")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SUGGESTIONS (gdep-inspired)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def suggest_improvements(map_path: str, room_name: str) -> str:
+    """Suggest improvements for a room based on analysis.
+
+    Checks for missing spawns, missing floors, difficulty balance issues,
+    and empty rooms.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room to analyze.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    suggestions = gdep_tools.suggest_improvements_data(room)
+
+    if not suggestions:
+        return f"Room '{room_name}' looks good — no suggestions."
+    lines = [f"Suggestions for '{room_name}':\n"]
+    for i, s in enumerate(suggestions, 1):
+        lines.append(f"  {i}. {s}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def compare_maps(map_path_a: str, map_path_b: str) -> str:
+    """Compare two maps and show structural differences.
+
+    Args:
+        map_path_a: Path to first .bin file.
+        map_path_b: Path to second .bin file.
+    """
+    path_a = _resolve(map_path_a)
+    path_b = _resolve(map_path_b)
+    if not path_a.exists():
+        return f"File not found: {map_path_a}"
+    if not path_b.exists():
+        return f"File not found: {map_path_b}"
+
+    data_a = cb.read_map(path_a)
+    data_b = cb.read_map(path_b)
+    rooms_a = cb.get_rooms(data_a)
+    rooms_b = cb.get_rooms(data_b)
+
+    snap_a = gdep_tools.compute_map_snapshot(rooms_a)
+    snap_b = gdep_tools.compute_map_snapshot(rooms_b)
+    changes = gdep_tools.diff_snapshots(snap_a, snap_b)
+
+    lines = [
+        f"Map Comparison: {path_a.stem} vs {path_b.stem}",
+        f"  Map A: {len(rooms_a)} rooms",
+        f"  Map B: {len(rooms_b)} rooms",
+        f"  Changes: {len(changes)}",
+        "",
+    ]
+    if changes:
+        for c in changes:
+            lines.append(f"  {c}")
+    else:
+        lines.append("  Maps are structurally identical.")
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  WIKI / CACHE (gdep-inspired)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def wiki_save(key: str, content: str, tags: str = "") -> str:
+    """Save analysis results or notes to the local wiki cache.
+
+    The wiki provides persistent local storage for analysis results so
+    repeated queries are instant.
+
+    Args:
+        key: Unique key for this entry (e.g. "difficulty/01_City_A").
+        content: Text content to store.
+        tags: Comma-separated tags for searching (e.g. "analysis,difficulty").
+    """
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    rel_path = gdep_tools.wiki_save_entry(WORKSPACE, key, content, tag_list)
+    return f"Saved wiki entry '{key}' ({len(content)} chars) → {rel_path}"
+
+
+@mcp.tool()
+def wiki_search(query: str) -> str:
+    """Search the wiki cache by key, content, or tags.
+
+    Args:
+        query: Search query (substring match in key, content, and tags).
+    """
+    results = gdep_tools.wiki_search_entries(WORKSPACE, query)
+    if not results:
+        return f"No wiki entries matching '{query}'."
+    lines = [f"Found {len(results)} wiki entries matching '{query}':\n"]
+    for r in results[:20]:
+        preview = r.get("content", "")[:80].replace("\n", " ")
+        lines.append(f"  [{r.get('key', '?')}] {preview}...")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def wiki_list() -> str:
+    """List all entries in the wiki cache."""
+    entries = gdep_tools.wiki_list_entries(WORKSPACE)
+    if not entries:
+        return "Wiki is empty. Use wiki_save to add entries."
+    lines = [f"Wiki entries ({len(entries)}):\n"]
+    for e in entries:
+        tags_str = f" [{', '.join(e['tags'])}]" if e.get("tags") else ""
+        lines.append(f"  {e['key']}{tags_str}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def wiki_get(key: str) -> str:
+    """Retrieve a specific wiki entry by key.
+
+    Args:
+        key: The entry key to look up.
+    """
+    entry = gdep_tools.wiki_get_entry(WORKSPACE, key)
+    if entry is None:
+        return f"Wiki entry '{key}' not found. Use wiki_list to see available entries."
+    lines = [
+        f"Wiki: {entry.get('key', key)}",
+        f"Tags: {', '.join(entry.get('tags', []))}",
+        "",
+        entry.get("content", ""),
+    ]
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MOD PROJECT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_mod_info() -> str:
+    """Get information about the current mod project.
+
+    Reads everest.yaml/everest.yml if present, lists map count,
+    and shows workspace structure.
+    """
+    lines = [f"Mod Project: {WORKSPACE.name}", f"  Path: {WORKSPACE}", ""]
+
+    # Check for everest.yaml
+    for fname in ("everest.yaml", "everest.yml"):
+        meta_path = WORKSPACE / fname
+        if meta_path.exists():
+            lines.append(f"  Everest metadata: {fname}")
+            content = meta_path.read_text(encoding="utf-8")
+            for line in content.strip().split("\n")[:10]:
+                lines.append(f"    {line}")
+            lines.append("")
+            break
+    else:
+        lines.append("  No everest.yaml found")
+        lines.append("")
+
+    # Count maps
+    maps_dir = WORKSPACE / "Maps"
+    if maps_dir.exists():
+        bins = list(maps_dir.rglob("*.bin"))
+        lines.append(f"  Maps: {len(bins)} .bin files")
+        for b in bins[:15]:
+            lines.append(f"    {b.relative_to(WORKSPACE)}")
+        if len(bins) > 15:
+            lines.append(f"    ... and {len(bins) - 15} more")
+    else:
+        lines.append("  Maps: no Maps/ directory")
+
+    # PCG library
+    pcg_lib = WORKSPACE / "PCG" / "patterns.json"
+    if pcg_lib.exists():
+        try:
+            lib = json.loads(pcg_lib.read_text(encoding="utf-8"))
+            lines.append(f"\n  PCG pattern library: {len(lib.get('patterns', []))} patterns")
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Wiki
+    wiki_dir = WORKSPACE / gdep_tools.WIKI_DIR_NAME
+    if wiki_dir.exists():
+        entries = list(wiki_dir.glob("*.json"))
+        lines.append(f"  Wiki cache: {len(entries)} entries")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def validate_map(map_path: str, auto_fix: bool = False) -> str:
+    """Validate an entire map for playability issues.
+
+    Checks all rooms for common problems: missing spawns, no floor tiles,
+    entities out of bounds, invalid dimensions.
+
+    Args:
+        map_path: Path to the .bin file.
+        auto_fix: If True, automatically fix issues where possible
+                  (adds spawns, floor tiles, clamps entities).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    total_issues = 0
+    total_fixes = 0
+    lines = [f"Map Validation: {path.stem} ({len(rooms)} rooms)\n"]
+
+    for r in rooms:
+        result = gdep_tools.validate_and_fix_room(r, auto_fix=auto_fix)
+        if result["issues"]:
+            total_issues += len(result["issues"])
+            total_fixes += len(result["fixes_applied"])
+            lines.append(f"  {r.get('name', '?')}:")
+            for issue in result["issues"]:
+                lines.append(f"    ✗ {issue}")
+            for fix in result["fixes_applied"]:
+                lines.append(f"    ✓ Fixed: {fix}")
+
+    if auto_fix and total_fixes > 0:
+        cb.write_map(path, data)
+
+    lines.insert(1, f"  Issues: {total_issues}")
+    if auto_fix:
+        lines.insert(2, f"  Auto-fixed: {total_fixes}")
+    if total_issues == 0:
+        lines.append("  All rooms PASS ✓")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CATALOG EXTENSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def get_trigger_definition(trigger_name: str) -> str:
+    """Read the source of a Lönn trigger definition .lua file.
+
+    Args:
+        trigger_name: Name of the trigger (searches in Loenn/triggers/).
+    """
+    # Search in common Lönn directories
+    search_dirs = [
+        WORKSPACE / "Loenn" / "triggers",
+        WORKSPACE / "loenn" / "triggers",
+        WORKSPACE / "Triggers",
+    ]
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for lua in search_dir.rglob("*.lua"):
+            if trigger_name.lower() in lua.stem.lower():
+                content = lua.read_text(encoding="utf-8", errors="replace")
+                rel = lua.relative_to(WORKSPACE)
+                return f"-- {rel}\n\n{content}"
+
+    return (
+        f"Trigger definition '{trigger_name}' not found.\n"
+        f"Searched: {', '.join(str(d.relative_to(WORKSPACE)) for d in search_dirs if d.exists())}"
+    )
+
+
+@mcp.tool()
+def get_effect_definition(effect_name: str) -> str:
+    """Read the source of a Lönn effect definition .lua file.
+
+    Args:
+        effect_name: Name of the effect (searches in Loenn/effects/).
+    """
+    search_dirs = [
+        WORKSPACE / "Loenn" / "effects",
+        WORKSPACE / "loenn" / "effects",
+        WORKSPACE / "Effects",
+    ]
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for lua in search_dir.rglob("*.lua"):
+            if effect_name.lower() in lua.stem.lower():
+                content = lua.read_text(encoding="utf-8", errors="replace")
+                rel = lua.relative_to(WORKSPACE)
+                return f"-- {rel}\n\n{content}"
+
+    return (
+        f"Effect definition '{effect_name}' not found.\n"
+        f"Searched: {', '.join(str(d.relative_to(WORKSPACE)) for d in search_dirs if d.exists())}"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  IMPORT / EXPORT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def export_room_json(map_path: str, room_name: str, output_path: str = "") -> str:
+    """Export a room as a JSON file for external editing or sharing.
+
+    Args:
+        map_path: Path to the .bin file.
+        room_name: Room to export.
+        output_path: Output JSON path (default: auto-generated).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    if not output_path.strip():
+        safe_name = room.get("name", "room").replace("/", "_")
+        output_path = f"Export/{safe_name}.json"
+    out_file = _resolve(output_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    out_file.write_text(
+        json.dumps(room, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    rel = out_file.relative_to(WORKSPACE)
+    return f"Exported room '{room_name}' → {rel}"
+
+
+@mcp.tool()
+def import_room_json(
+    map_path: str,
+    json_path: str,
+    new_name: str = "",
+    x: int = 0,
+    y: int = 0,
+) -> str:
+    """Import a room from a JSON file into a map.
+
+    Args:
+        map_path: Path to the .bin file to import into.
+        json_path: Path to the JSON file (exported by export_room_json).
+        new_name: Optional new name for the room (overrides name in JSON).
+        x: X position override (-1 = use position from JSON).
+        y: Y position override (-1 = use position from JSON).
+    """
+    map_file = _resolve(map_path)
+    if not map_file.exists():
+        return f"Map file not found: {map_path}"
+
+    json_file = _resolve(json_path)
+    if not json_file.exists():
+        return f"JSON file not found: {json_path}"
+
+    try:
+        room = json.loads(json_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    if not isinstance(room, dict) or "__name" not in room:
+        return "Invalid room JSON: missing __name field."
+
+    data = cb.read_map(map_file)
+    levels = cb.find_child(data, "levels")
+    if levels is None:
+        return "Invalid map: no 'levels' element."
+
+    if new_name:
+        name = new_name if new_name.startswith("lvl_") else f"lvl_{new_name}"
+        room["name"] = name
+
+    if x != 0:
+        room["x"] = x
+    if y != 0:
+        room["y"] = y
+
+    # Check duplicate
+    for r in cb.get_rooms(data):
+        if r.get("name") == room.get("name"):
+            return f"Room '{room.get('name')}' already exists in map."
+
+    levels["__children"].append(room)
+    cb.write_map(map_file, data)
+    return f"Imported room '{room.get('name')}' into {map_path} at ({room.get('x',0)},{room.get('y',0)})"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DIFF & FIX (gdep-inspired)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def summarize_map_diff(map_path: str, snapshot_key: str = "") -> str:
+    """Create or compare a structural snapshot of the map.
+
+    First call (or with new snapshot_key): saves current state to wiki.
+    Subsequent call with same key: shows what changed since the snapshot.
+
+    Args:
+        map_path: Path to the .bin file.
+        snapshot_key: Key to identify this snapshot (default: map filename).
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    current_snap = gdep_tools.compute_map_snapshot(rooms)
+    if not snapshot_key:
+        snapshot_key = f"snapshot/{path.stem}"
+
+    # Check if previous snapshot exists
+    prev_entry = gdep_tools.wiki_get_entry(WORKSPACE, snapshot_key)
+
+    # Save current snapshot
+    gdep_tools.wiki_save_entry(
+        WORKSPACE, snapshot_key,
+        json.dumps(current_snap, ensure_ascii=False),
+        tags=["snapshot", "diff"],
+    )
+
+    if prev_entry is None:
+        return (
+            f"Snapshot saved: '{snapshot_key}' ({len(rooms)} rooms)\n"
+            "Call again later to see what changed."
+        )
+
+    # Compare
+    try:
+        old_snap = json.loads(prev_entry.get("content", "{}"))
+    except json.JSONDecodeError:
+        return "Previous snapshot was corrupted. New snapshot saved."
+
+    changes = gdep_tools.diff_snapshots(old_snap, current_snap)
+
+    if not changes:
+        return f"No structural changes since last snapshot ('{snapshot_key}')."
+
+    lines = [f"Changes since last snapshot '{snapshot_key}':", ""]
+    for c in changes:
+        lines.append(f"  {c}")
+    lines.append(f"\n(New snapshot saved. {len(changes)} change(s) detected.)")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def batch_validate_and_fix(map_path: str, auto_fix: bool = False) -> str:
+    """Validate all rooms in a map and optionally auto-fix issues.
+
+    Checks for: missing spawns, no floors, entities out of bounds,
+    invalid dimensions. Auto-fix adds spawns, floor tiles, and clamps
+    entities to room bounds.
+
+    Args:
+        map_path: Path to the .bin file.
+        auto_fix: If True, apply automatic fixes.
+    """
+    return validate_map(map_path, auto_fix=auto_fix)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
