@@ -15,6 +15,8 @@ Tools:
   Analysis:       analyze_map, visualize_map_layout
   Generation:     build_pattern_library, generate_room_from_pattern,
                   validate_room, ingest_external_map
+  Image/Terrain:  generate_map_from_image, generate_terrain_map,
+                  preview_terrain_biomes
 
 Usage:
   python server.py                         (uses cwd as workspace)
@@ -38,9 +40,13 @@ from fastmcp import FastMCP
 try:
     from . import celeste_bin as cb          # installed package
     from . import pcg                        # installed package
+    from . import image_map                  # installed package
+    from . import terrain_gen                # installed package
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import pcg                               # run directly from source
+    import image_map                         # run directly from source
+    import terrain_gen                       # run directly from source
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -2559,6 +2565,354 @@ def ingest_external_map(
         f"  Library path:    {library_path}",
     ]
     return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  IMAGE-TO-MAP AND TERRAIN GENERATION TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@mcp.tool()
+def generate_map_from_image(
+    image_path: str,
+    output_path: str = "",
+    package_name: str = "ImageMap",
+    scale: int = 1,
+    room_width_tiles: int = 40,
+    room_height_tiles: int = 23,
+    color_map_json: str = "",
+    tolerance: int = 64,
+) -> str:
+    """Convert a color-mapped image into a full playable Celeste map.
+
+    Each pixel (or pixel block when scale > 1) in the source image is
+    interpreted as one 8×8 tile in the map.  Colors are mapped to tile
+    types and entities using either the default color map or a custom one.
+
+    Default color mapping:
+      Black (#000000)   → Solid tile
+      White (#FFFFFF)   → Air (empty space)
+      Red (#FF0000)     → Spike hazard
+      Green (#00FF00)   → Player spawn point
+      Blue (#0000FF)    → Jump-through platform
+      Yellow (#FFFF00)  → Strawberry collectible
+      Magenta (#FF00FF) → Spring (bounce pad)
+      Cyan (#00FFFF)    → Refill crystal
+      Orange (#FF8000)  → Crumble block
+      Grey (#808080)    → Background solid (decorative)
+
+    The image is automatically split into rooms of the specified tile size.
+    Each room gets a player spawn if none is found in the color data.
+
+    Args:
+        image_path: Path to the source image (PNG, JPG, BMP, etc.)
+                    relative to the workspace.
+        output_path: Output .bin map file path (relative to workspace).
+                     Default: auto-generated from image filename.
+        package_name: Celeste map package name (default: "ImageMap").
+        scale: Pixels per tile — 1 means each pixel = one tile.
+               Use higher values for large images (e.g. scale=4 means
+               every 4×4 pixel block = one tile).
+        room_width_tiles: Max room width in tiles (default 40 = 320px).
+        room_height_tiles: Max room height in tiles (default 23 = 184px).
+        color_map_json: Optional custom color map as JSON object.
+                        Keys are hex colors (e.g. "#FF0000"), values are
+                        role strings (solid/air/spike/spawn/jumpthru/
+                        strawberry/spring/refill/crumble/bg_solid).
+                        Example: '{"#FF0000":"solid","#00FF00":"spawn"}'
+        tolerance: Color matching tolerance (0-255). Higher = more lenient
+                   matching. Default 64.
+    """
+    # Resolve image path
+    img_file = _resolve(image_path)
+    if not img_file.exists():
+        return f"Image file not found: {image_path}"
+
+    # Parse custom color map if provided
+    custom_cmap = None
+    if color_map_json.strip():
+        try:
+            raw = json.loads(color_map_json)
+            if not isinstance(raw, dict):
+                return "color_map_json must be a JSON object (dict)."
+            custom_cmap = {}
+            for hex_color, role in raw.items():
+                hex_color = hex_color.strip().lstrip("#")
+                if len(hex_color) != 6:
+                    return f"Invalid hex color: #{hex_color}. Use 6-digit hex."
+                r = int(hex_color[0:2], 16)
+                g = int(hex_color[2:4], 16)
+                b = int(hex_color[4:6], 16)
+                custom_cmap[(r, g, b)] = role
+        except (json.JSONDecodeError, ValueError) as e:
+            return f"Invalid color_map_json: {e}"
+
+    # Resolve output path
+    if not output_path.strip():
+        stem = img_file.stem
+        output_path = f"Maps/ImageMap/{stem}.bin"
+    out_file = _resolve(output_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Generate map data
+    try:
+        map_data = image_map.image_to_map_data(
+            image_path=str(img_file),
+            package_name=package_name,
+            color_map=custom_cmap,
+            scale=scale,
+            room_width_tiles=room_width_tiles,
+            room_height_tiles=room_height_tiles,
+            tolerance=tolerance,
+        )
+    except ImportError as e:
+        return (
+            f"Missing dependency: {e}\n"
+            "Install Pillow with: pip install Pillow"
+        )
+    except Exception as e:
+        return f"Error converting image: {e}"
+
+    # Write .bin file
+    cb.write_map(out_file, map_data)
+
+    # Count rooms and entities
+    levels = cb.find_child(map_data, "levels")
+    room_count = len(levels["__children"]) if levels else 0
+    total_entities = 0
+    for room in (levels or {}).get("__children", []):
+        ent_el = cb.find_child(room, "entities")
+        if ent_el:
+            total_entities += len(ent_el.get("__children", []))
+
+    rel_out = out_file.relative_to(WORKSPACE)
+    lines = [
+        f"Map generated from image: {image_path}",
+        f"  Output:     {rel_out}",
+        f"  Package:    {package_name}",
+        f"  Scale:      {scale} px/tile",
+        f"  Rooms:      {room_count}",
+        f"  Entities:   {total_entities}",
+        f"  Room size:  {room_width_tiles}x{room_height_tiles} tiles "
+        f"({room_width_tiles * 8}x{room_height_tiles * 8} px)",
+        f"  Tolerance:  {tolerance}",
+    ]
+    if custom_cmap:
+        lines.append(f"  Custom colors: {len(custom_cmap)} entries")
+    else:
+        lines.append("  Color map: default (10 colours)")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def generate_terrain_map(
+    output_path: str = "",
+    package_name: str = "TerrainGen",
+    seed: int = -1,
+    width_rooms: int = 4,
+    height_rooms: int = 3,
+    room_width_tiles: int = 40,
+    room_height_tiles: int = 23,
+    frequency: float = 8.0,
+    voronoi_points: int = 12,
+    biome_set: str = "",
+    difficulty: int = 3,
+) -> str:
+    """Generate a procedural Celeste map using Perlin noise and Voronoi biomes.
+
+    Creates a complete playable map with terrain shaped by Perlin noise and
+    biome regions defined by Voronoi diagrams.  Inspired by procedural map
+    generators that combine noise-based heightmaps with regional variety.
+
+    Each room is assigned a biome (mountain, forest, plains, lake, cave,
+    summit) based on its Voronoi region and local noise value.  Tile density,
+    platform placement, hazards, and collectibles are all biome-aware.
+
+    Biomes:
+      mountain — dense tiles, tight platforms, spikes
+      forest   — moderate density, many platforms, springs
+      plains   — open spaces, gentle platforms, collectibles
+      lake     — jump-throughs over gaps, refills
+      cave     — enclosed spaces, crumble blocks, dark rooms
+      summit   — sparse platforms, wind effects
+
+    The generator is fully seeded: the same seed + parameters always produce
+    the same map.
+
+    Args:
+        output_path: Output .bin map file path (relative to workspace).
+                     Default: auto-generated as "Maps/TerrainGen/seed_<N>.bin".
+        package_name: Celeste map package name (default: "TerrainGen").
+        seed: Integer seed for reproducible generation.
+              -1 = generate random seed.
+        width_rooms: Number of rooms horizontally (default 4).
+        height_rooms: Number of rooms vertically (default 3).
+        room_width_tiles: Tiles per room width (default 40 = 320px).
+        room_height_tiles: Tiles per room height (default 23 = 184px).
+        frequency: Perlin noise frequency — lower = smoother terrain.
+                   Range 2-32 recommended (default 8).
+        voronoi_points: Number of biome region centres (default 12).
+                        More points = smaller, more varied regions.
+        biome_set: Comma-separated or JSON array of biomes to use.
+                   Default (empty): use all biomes.
+                   Example: "mountain,cave,summit" or '["forest","plains"]'
+        difficulty: 1-5 difficulty scale (default 3).
+                    Affects hazard count and tile density.
+    """
+    # Resolve seed
+    if seed < 0:
+        seed = random.randint(0, 0xFFFF_FFFF)
+
+    # Parse biome set
+    biomes: list = []
+    if biome_set.strip():
+        try:
+            parsed = json.loads(biome_set)
+            if isinstance(parsed, list):
+                biomes = [str(b).strip() for b in parsed]
+            else:
+                biomes = [str(parsed).strip()]
+        except json.JSONDecodeError:
+            biomes = [b.strip() for b in biome_set.split(",") if b.strip()]
+
+    # Validate biomes
+    valid_biomes = set(terrain_gen.BIOMES)
+    if biomes:
+        invalid = [b for b in biomes if b not in valid_biomes]
+        if invalid:
+            return (
+                f"Unknown biome(s): {', '.join(invalid)}. "
+                f"Valid biomes: {', '.join(valid_biomes)}"
+            )
+    else:
+        biomes = None  # Use all biomes
+
+    # Validate parameters
+    if width_rooms < 1 or height_rooms < 1:
+        return "width_rooms and height_rooms must be >= 1."
+    if width_rooms > 20 or height_rooms > 20:
+        return "Maximum 20x20 room grid (400 rooms)."
+    if room_width_tiles < 10 or room_height_tiles < 10:
+        return "Room dimensions must be at least 10 tiles."
+    if not (1 <= difficulty <= 5):
+        return "difficulty must be between 1 and 5."
+
+    # Resolve output path
+    if not output_path.strip():
+        output_path = f"Maps/TerrainGen/seed_{seed}.bin"
+    out_file = _resolve(output_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Generate map
+    map_data = terrain_gen.generate_terrain_map(
+        seed=seed,
+        width_rooms=width_rooms,
+        height_rooms=height_rooms,
+        room_width_tiles=room_width_tiles,
+        room_height_tiles=room_height_tiles,
+        frequency=frequency,
+        voronoi_points=voronoi_points,
+        biome_set=biomes,
+        difficulty=difficulty,
+        package_name=package_name,
+    )
+
+    # Write .bin file
+    cb.write_map(out_file, map_data)
+
+    # Get biome summary
+    summary = terrain_gen.get_biome_summary(
+        seed=seed,
+        width_rooms=width_rooms,
+        height_rooms=height_rooms,
+        room_width_tiles=room_width_tiles,
+        room_height_tiles=room_height_tiles,
+        frequency=frequency,
+        voronoi_points=voronoi_points,
+        biome_set=biomes,
+    )
+
+    # Count entities
+    levels = cb.find_child(map_data, "levels")
+    room_count = len(levels["__children"]) if levels else 0
+    total_entities = 0
+    for room in (levels or {}).get("__children", []):
+        ent_el = cb.find_child(room, "entities")
+        if ent_el:
+            total_entities += len(ent_el.get("__children", []))
+
+    rel_out = out_file.relative_to(WORKSPACE)
+    lines = [
+        f"Terrain map generated with seed {seed}",
+        f"  Output:        {rel_out}",
+        f"  Package:       {package_name}",
+        f"  Grid:          {width_rooms}x{height_rooms} rooms ({room_count} total)",
+        f"  Room size:     {room_width_tiles}x{room_height_tiles} tiles "
+        f"({room_width_tiles * 8}x{room_height_tiles * 8} px)",
+        f"  Frequency:     {frequency}",
+        f"  Voronoi pts:   {voronoi_points}",
+        f"  Difficulty:    {difficulty}/5",
+        f"  Entities:      {total_entities}",
+        f"  Seed:          {seed}",
+        "",
+        summary,
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def preview_terrain_biomes(
+    seed: int = 42,
+    width_rooms: int = 4,
+    height_rooms: int = 3,
+    frequency: float = 8.0,
+    voronoi_points: int = 12,
+    biome_set: str = "",
+) -> str:
+    """Preview the biome layout for a terrain generation without creating the map.
+
+    Shows an ASCII grid of which biome each room would get, useful for
+    trying different seeds and parameters before committing to generation.
+
+    Args:
+        seed: Integer seed for the preview.
+        width_rooms: Number of rooms horizontally.
+        height_rooms: Number of rooms vertically.
+        frequency: Perlin noise frequency.
+        voronoi_points: Number of Voronoi biome centres.
+        biome_set: Comma-separated or JSON array of biomes.
+    """
+    # Parse biome set
+    biomes: list = []
+    if biome_set.strip():
+        try:
+            parsed = json.loads(biome_set)
+            if isinstance(parsed, list):
+                biomes = [str(b).strip() for b in parsed]
+            else:
+                biomes = [str(parsed).strip()]
+        except json.JSONDecodeError:
+            biomes = [b.strip() for b in biome_set.split(",") if b.strip()]
+
+    valid_biomes = set(terrain_gen.BIOMES)
+    if biomes:
+        invalid = [b for b in biomes if b not in valid_biomes]
+        if invalid:
+            return (
+                f"Unknown biome(s): {', '.join(invalid)}. "
+                f"Valid: {', '.join(valid_biomes)}"
+            )
+    else:
+        biomes = None
+
+    return terrain_gen.get_biome_summary(
+        seed=seed,
+        width_rooms=width_rooms,
+        height_rooms=height_rooms,
+        frequency=frequency,
+        voronoi_points=voronoi_points,
+        biome_set=biomes,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
