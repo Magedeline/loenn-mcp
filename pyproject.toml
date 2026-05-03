@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "loenn-mcp"
-version = "2.1.0"
+version = "3.0.0"
 description = "Celeste map editor for AI agents — MCP server for reading, editing, and previewing .bin map files"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -1,4 +1,4 @@
-loenn-mcp v2.1.0
+loenn-mcp v3.0.0
 ================
 
 Closes the styleground / trigger gap reported by users — previously you could
@@ -6,7 +6,7 @@ add entities and rooms via MCP, but stylegrounds and triggers required opening
 Lönn manually. Now everything is reachable from the agent.
 
 
-WHAT'S NEW IN v2.1
+WHAT'S NEW IN v3.0
 ------------------
 
 6 new MCP tools (28 tools total):
