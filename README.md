@@ -12,7 +12,9 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 
 ## Features
 
-### 31 MCP tools across 8 categories
+### 63 MCP tools across 14 categories
+
+Integrates game analysis concepts from [gdep](https://github.com/pirua-game/ai_game_base_analysis_cli_mcp_tool) adapted for Celeste map editing: wiki caching, pattern detection, difficulty analysis, room connectivity, map diffing, and batch validation.
 
 **Map Reading**
 | Tool | Description |
@@ -21,18 +23,25 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 | `read_map_overview` | Summary of rooms, entities, triggers, and stylegrounds |
 | `read_room` | Full detail for a single room: tiles, entities, triggers, decals |
 | `get_room_tiles` | Raw tile grid (foreground or background) for a room |
+| `read_map_metadata` | Map-level metadata: package name, filler rects, music, wind |
 
 **Map Editing**
 | Tool | Description |
 |---|---|
 | `add_entity` | Place an entity in a room (auto-assigns ID) |
 | `remove_entity` | Delete an entity by ID |
+| `update_entity` | Update properties of an existing entity |
+| `move_entity` | Move an entity to a new position |
 | `add_trigger` | Place a trigger (rectangular region) in a room, with optional path nodes |
 | `remove_trigger` | Delete a trigger by ID |
 | `set_room_tiles` | Replace the tile grid for a room |
 | `add_room` | Create a new room with custom position/size |
 | `remove_room` | Delete a room from the map |
 | `create_map` | Create a new empty `.bin` map file |
+| `update_room` | Update room properties (music, dark, space, wind, etc.) |
+| `clone_room` | Duplicate a room with all tiles, entities, triggers, decals |
+| `batch_add_entities` | Add multiple entities to a room in one call |
+| `resize_room` | Resize a room, adjusting tile grids accordingly |
 
 **Stylegrounds**
 | Tool | Description |
@@ -42,20 +51,73 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 | `remove_styleground` | Remove an effect by index |
 | `update_styleground` | Merge property changes into an existing effect |
 
-**Entity / Trigger Catalog**
+**Decals (NEW in v4)**
+| Tool | Description |
+|---|---|
+| `list_decals` | List all foreground or background decals in a room |
+| `add_decal` | Add a foreground or background decal to a room |
+| `remove_decal` | Remove a decal by index |
+
+**Entity / Trigger / Effect Catalog**
 | Tool | Description |
 |---|---|
 | `list_entity_definitions` | Browse Lönn entity `.lua` files in the project |
 | `get_entity_definition` | Read the full source of a single entity definition |
 | `list_trigger_definitions` | Browse Lönn trigger `.lua` files |
+| `get_trigger_definition` | Read the full source of a single trigger definition |
 | `list_effect_definitions` | Browse Lönn effect `.lua` files |
+| `get_effect_definition` | Read the full source of a single effect definition |
 
-**Analysis**
+**Search (NEW in v4)**
+| Tool | Description |
+|---|---|
+| `search_entities` | Search for entities across all rooms by type, name, or properties |
+| `search_triggers` | Search for triggers across all rooms by type or name |
+| `compare_rooms` | Compare two rooms side by side (entities, tiles, properties) |
+
+**Analysis (gdep-inspired)**
 | Tool | Description |
 |---|---|
 | `analyze_map` | Statistics: entity counts, type breakdown, world bounds |
 | `visualize_map_layout` | ASCII mini-map of room positions |
 | `preview_map_section` | Detailed ASCII preview of a map region |
+| `analyze_entity_usage` | Cross-room entity usage statistics and design patterns |
+| `analyze_difficulty` | Estimate room/map difficulty based on hazards, nav aids, tile coverage |
+| `find_entity_references` | Find all rooms that use a specific entity type (reverse-lookup) |
+| `detect_map_patterns` | Detect gameplay design patterns (linear, hub, collectible-rich, etc.) |
+| `analyze_room_connectivity` | Room adjacency graph, isolated rooms, dead ends, hubs |
+
+**Suggestions (gdep-inspired)**
+| Tool | Description |
+|---|---|
+| `suggest_improvements` | Level design improvement suggestions for a room |
+| `compare_maps` | Compare two maps side by side (rooms, entities, complexity) |
+
+**Wiki / Analysis Cache (gdep-inspired)**
+| Tool | Description |
+|---|---|
+| `wiki_save` | Save analysis results to a local wiki cache for reuse |
+| `wiki_search` | Search the wiki cache by keyword, tag, or category |
+| `wiki_list` | List all wiki cache entries with metadata |
+| `wiki_get` | Retrieve a specific wiki entry by key |
+
+**Mod Project**
+| Tool | Description |
+|---|---|
+| `get_mod_info` | Read mod metadata (everest.yaml, Lönn plugins, maps, graphics) |
+| `validate_map` | Validate an entire map — playability checks on every room |
+
+**Import / Export (NEW in v4)**
+| Tool | Description |
+|---|---|
+| `export_room_json` | Export a room's data as JSON for inspection or reuse |
+| `import_room_json` | Import a room from a JSON file into a map |
+
+**Diff & Fix (gdep-inspired)**
+| Tool | Description |
+|---|---|
+| `summarize_map_diff` | Take or compare map snapshots for architecture-level diffing |
+| `batch_validate_and_fix` | Validate all rooms with optional auto-fix for common issues |
 
 **Rendering**
 | Tool | Description |

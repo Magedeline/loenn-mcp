@@ -1,28 +1,49 @@
 """
 Lönn MCP Server — Celeste Map Editor for AI Agents
 
-Provides tools for reading, editing, analyzing, and generating Celeste map
-files (.bin) directly from VS Code via the Model Context Protocol.
+Provides 63 MCP tools for reading, editing, analyzing, and generating Celeste
+map files (.bin) directly from VS Code via the Model Context Protocol.
 
-Tools:
-  Map Reading:    list_maps, read_map_overview, read_room, get_room_tiles
-  Map Editing:    add_entity, remove_entity, add_trigger, remove_trigger,
-                  set_room_tiles, add_room, remove_room, create_map
-  Stylegrounds:   list_stylegrounds, add_styleground, remove_styleground,
-                  update_styleground
-  Entity Catalog: list_entity_definitions, get_entity_definition,
-                  list_trigger_definitions
-  Analysis:       analyze_map, visualize_map_layout
-  Generation:     build_pattern_library, generate_room_from_pattern,
-                  validate_room, ingest_external_map
-  Image/Terrain:  generate_map_from_image, generate_terrain_map,
-                  preview_terrain_biomes
+Integrates game analysis concepts from gdep (pirua-game/ai_game_base_analysis_cli_mcp_tool)
+adapted for Celeste map editing: wiki caching, pattern detection, difficulty
+analysis, room connectivity, map diffing, and batch validation.
+
+Tool categories (63 tools):
+  Map Reading (5):     list_maps, read_map_overview, read_room, get_room_tiles,
+                       read_map_metadata
+  Map Editing (14):    add_entity, remove_entity, add_trigger, remove_trigger,
+                       set_room_tiles, add_room, remove_room, create_map,
+                       update_entity, move_entity, update_room, clone_room,
+                       batch_add_entities, resize_room
+  Stylegrounds (4):    list_stylegrounds, add_styleground, remove_styleground,
+                       update_styleground
+  Decals (3):          list_decals, add_decal, remove_decal
+  Entity/Trigger
+    Catalog (6):       list_entity_definitions, get_entity_definition,
+                       list_trigger_definitions, get_trigger_definition,
+                       list_effect_definitions, get_effect_definition
+  Search (3):          search_entities, search_triggers, compare_rooms
+  Analysis (8):        analyze_map, visualize_map_layout, preview_map_section,
+                       analyze_entity_usage, analyze_difficulty,
+                       find_entity_references, detect_map_patterns,
+                       analyze_room_connectivity
+  Suggestions (2):     suggest_improvements, compare_maps
+  Wiki / Cache (4):    wiki_save, wiki_search, wiki_list, wiki_get
+  Mod Project (2):     get_mod_info, validate_map
+  Import/Export (2):   export_room_json, import_room_json
+  Diff & Fix (2):      summarize_map_diff, batch_validate_and_fix
+  Rendering (1):       render_map_html
+  Generation (4):      build_pattern_library, generate_room_from_pattern,
+                       validate_room, ingest_external_map
+  Image/Terrain (3):   generate_map_from_image, generate_terrain_map,
+                       preview_terrain_biomes
 
 Usage:
   python server.py                         (uses cwd as workspace)
   LOENN_MCP_WORKSPACE=/path python server.py  (explicit workspace)
 """
 
+import copy
 import io
 import json
 import os
@@ -53,14 +74,16 @@ WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 mcp = FastMCP(
     "loenn-mcp",
     instructions=(
-        "Celeste / Lönn Map Editor MCP — read, edit, analyze, and "
-        "procedurally generate Celeste .bin map files. "
-        "Use build_pattern_library to extract room patterns from existing maps, "
-        "generate_room_from_pattern to create new rooms with a chosen strategy "
-        "(balanced/exploration/challenge/speedrun) and optional seed, "
-        "validate_room to check basic playability, and "
-        "ingest_external_map to import and attribute maps from external URLs "
-        "such as GameBanana mod downloads."
+        "Celeste / Lönn Map Editor MCP — 63 tools for reading, editing, "
+        "analyzing, and procedurally generating Celeste .bin map files. "
+        "Integrates game analysis concepts from gdep for wiki caching, "
+        "pattern detection, difficulty analysis, and room connectivity. "
+        "Use search_entities/search_triggers for cross-room lookups, "
+        "analyze_difficulty/detect_map_patterns/analyze_room_connectivity "
+        "for deep map analysis, wiki_save/wiki_search for caching results, "
+        "suggest_improvements for level design advice, "
+        "build_pattern_library/generate_room_from_pattern for PCG, "
+        "and batch_validate_and_fix for whole-map validation."
     ),
 )
 
@@ -2913,6 +2936,2148 @@ def preview_terrain_biomes(
         voronoi_points=voronoi_points,
         biome_set=biomes,
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP READING EXTENSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def read_map_metadata(map_path: str) -> str:
+    """Read map-level metadata: package name, filler rects, style summary.
+
+    Provides a quick snapshot of the map's internal structure without
+    listing every room in detail. Useful for understanding map identity
+    and configuration before deeper analysis.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    filler = cb.find_child(data, "Filler")
+    filler_n = len(filler.get("__children", [])) if filler else 0
+
+    style = cb.find_child(data, "Style")
+    fg_n = bg_n = 0
+    if style:
+        fg_el = cb.find_child(style, "Foregrounds")
+        bg_el = cb.find_child(style, "Backgrounds")
+        fg_n = len(fg_el.get("__children", [])) if fg_el else 0
+        bg_n = len(bg_el.get("__children", [])) if bg_el else 0
+
+    size_kb = path.stat().st_size / 1024
+
+    lines = [
+        f"Package: {data.get('_package', '?')}",
+        f"File: {path.name} ({size_kb:.1f} KB)",
+        f"Rooms: {len(rooms)}",
+        f"Filler rects: {filler_n}",
+        f"Stylegrounds: {fg_n} fg, {bg_n} bg",
+    ]
+
+    if rooms:
+        dark_count = sum(1 for r in rooms if r.get("dark", False))
+        space_count = sum(1 for r in rooms if r.get("space", False))
+        if dark_count:
+            lines.append(f"Dark rooms: {dark_count}")
+        if space_count:
+            lines.append(f"Space rooms: {space_count}")
+        music_set = {r.get("music", "") for r in rooms if r.get("music")}
+        if music_set:
+            lines.append(f"Music tracks: {', '.join(sorted(music_set))}")
+        wind_set = {r.get("windPattern", "None") for r in rooms} - {"None", ""}
+        if wind_set:
+            lines.append(f"Wind patterns: {', '.join(sorted(wind_set))}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def search_entities(
+    map_path: str,
+    entity_type: str = "",
+    name_contains: str = "",
+    property_filter: str = "{}",
+) -> str:
+    """Search for entities across all rooms in a map.
+
+    Inspired by gdep's query_project_api — lets you find every instance of
+    an entity type, or filter by a substring in the entity name, or match
+    on property values.
+
+    Args:
+        map_path: Path to the .bin file
+        entity_type: Exact entity type name (e.g. "strawberry", "spinner")
+        name_contains: Substring match on entity type name (case-insensitive)
+        property_filter: JSON object of key-value pairs to match
+            (e.g. '{"winged": true}')
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    try:
+        pf = json.loads(property_filter)
+    except json.JSONDecodeError:
+        return f"Invalid JSON property_filter: {property_filter}"
+
+    results: list[str] = []
+    total = 0
+    nc = name_contains.lower()
+
+    for room in rooms:
+        rname = room.get("name", "?")
+        ent_el = cb.find_child(room, "entities")
+        if not ent_el:
+            continue
+        for e in ent_el.get("__children", []):
+            etype = e.get("__name", "")
+            if entity_type and etype != entity_type:
+                continue
+            if nc and nc not in etype.lower():
+                continue
+            if pf:
+                match = all(e.get(k) == v for k, v in pf.items())
+                if not match:
+                    continue
+            total += 1
+            extra = {k: v for k, v in e.items()
+                     if k not in ("__name", "__children", "id", "x", "y")}
+            extra_s = " ".join(f"{k}={v}" for k, v in extra.items())
+            results.append(
+                f"  {rname} [{e.get('id', 0)}] {etype} "
+                f"({e.get('x', 0)},{e.get('y', 0)}) {extra_s}".rstrip()
+            )
+            if total >= 200:
+                break
+        if total >= 200:
+            break
+
+    if not results:
+        return "No matching entities found."
+
+    header = f"Found {total} matching entities"
+    if total >= 200:
+        header += " (showing first 200)"
+    return header + ":\n" + "\n".join(results)
+
+
+@mcp.tool()
+def search_triggers(
+    map_path: str,
+    trigger_type: str = "",
+    name_contains: str = "",
+) -> str:
+    """Search for triggers across all rooms in a map.
+
+    Args:
+        map_path: Path to the .bin file
+        trigger_type: Exact trigger type name
+        name_contains: Substring match on trigger type name (case-insensitive)
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    results: list[str] = []
+    total = 0
+    nc = name_contains.lower()
+
+    for room in rooms:
+        rname = room.get("name", "?")
+        trig_el = cb.find_child(room, "triggers")
+        if not trig_el:
+            continue
+        for t in trig_el.get("__children", []):
+            ttype = t.get("__name", "")
+            if trigger_type and ttype != trigger_type:
+                continue
+            if nc and nc not in ttype.lower():
+                continue
+            total += 1
+            results.append(
+                f"  {rname} [{t.get('id', 0)}] {ttype} "
+                f"({t.get('x', 0)},{t.get('y', 0)}) "
+                f"{t.get('width', 0)}x{t.get('height', 0)}"
+            )
+            if total >= 200:
+                break
+        if total >= 200:
+            break
+
+    if not results:
+        return "No matching triggers found."
+
+    header = f"Found {total} matching triggers"
+    if total >= 200:
+        header += " (showing first 200)"
+    return header + ":\n" + "\n".join(results)
+
+
+@mcp.tool()
+def compare_rooms(
+    map_path: str,
+    room_a: str,
+    room_b: str,
+) -> str:
+    """Compare two rooms side by side: size, entity counts, tile coverage.
+
+    Args:
+        map_path: Path to the .bin file
+        room_a: First room name
+        room_b: Second room name
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    ra = cb.get_room(data, room_a)
+    rb = cb.get_room(data, room_b)
+
+    if ra is None:
+        return f"Room '{room_a}' not found."
+    if rb is None:
+        return f"Room '{room_b}' not found."
+
+    def _stats(room: dict) -> dict:
+        ent_el = cb.find_child(room, "entities")
+        trig_el = cb.find_child(room, "triggers")
+        ent_n = len(ent_el.get("__children", [])) if ent_el else 0
+        trig_n = len(trig_el.get("__children", [])) if trig_el else 0
+
+        ent_types: dict[str, int] = {}
+        if ent_el:
+            for e in ent_el.get("__children", []):
+                t = e.get("__name", "unknown")
+                ent_types[t] = ent_types.get(t, 0) + 1
+
+        solids = cb.find_child(room, "solids")
+        tile_info = pcg._analyze_tiles(room) if solids else {}
+
+        fgd = cb.find_child(room, "fgdecals")
+        bgd = cb.find_child(room, "bgdecals")
+        fgd_n = len(fgd.get("__children", [])) if fgd else 0
+        bgd_n = len(bgd.get("__children", [])) if bgd else 0
+
+        return {
+            "name": room.get("name", "?"),
+            "width": room.get("width", 0),
+            "height": room.get("height", 0),
+            "x": room.get("x", 0),
+            "y": room.get("y", 0),
+            "entities": ent_n,
+            "triggers": trig_n,
+            "entity_types": ent_types,
+            "fg_decals": fgd_n,
+            "bg_decals": bgd_n,
+            "solid_pct": tile_info.get("solid_pct", 0),
+            "dark": room.get("dark", False),
+            "space": room.get("space", False),
+            "music": room.get("music", ""),
+            "wind": room.get("windPattern", "None"),
+        }
+
+    sa, sb = _stats(ra), _stats(rb)
+
+    lines = [
+        f"{'Property':<20} {'Room A':>20} {'Room B':>20}",
+        f"{'─' * 20} {'─' * 20} {'─' * 20}",
+        f"{'Name':<20} {sa['name']:>20} {sb['name']:>20}",
+        f"{'Size':<20} {sa['width']}x{sa['height']:>14} {sb['width']}x{sb['height']:>14}",
+        f"{'Position':<20} ({sa['x']},{sa['y']}){'':<8} ({sb['x']},{sb['y']})",
+        f"{'Entities':<20} {sa['entities']:>20} {sb['entities']:>20}",
+        f"{'Triggers':<20} {sa['triggers']:>20} {sb['triggers']:>20}",
+        f"{'FG Decals':<20} {sa['fg_decals']:>20} {sb['fg_decals']:>20}",
+        f"{'BG Decals':<20} {sa['bg_decals']:>20} {sb['bg_decals']:>20}",
+        f"{'Solid %':<20} {sa['solid_pct']:.1%}{'':<13} {sb['solid_pct']:.1%}",
+        f"{'Dark':<20} {str(sa['dark']):>20} {str(sb['dark']):>20}",
+        f"{'Space':<20} {str(sa['space']):>20} {str(sb['space']):>20}",
+        f"{'Music':<20} {(sa['music'] or 'none'):>20} {(sb['music'] or 'none'):>20}",
+        f"{'Wind':<20} {sa['wind']:>20} {sb['wind']:>20}",
+    ]
+
+    all_types = sorted(set(list(sa["entity_types"]) + list(sb["entity_types"])))
+    if all_types:
+        lines.append(f"\n{'Entity Type':<30} {'A':>8} {'B':>8}")
+        for t in all_types[:30]:
+            ca = sa["entity_types"].get(t, 0)
+            cb_count = sb["entity_types"].get(t, 0)
+            lines.append(f"  {t:<28} {ca:>8} {cb_count:>8}")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP EDITING EXTENSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def update_entity(
+    map_path: str,
+    room_name: str,
+    entity_id: int,
+    properties: str = "{}",
+) -> str:
+    """Update properties of an existing entity by ID.
+
+    Merges the given properties into the entity. Pass null to clear a key.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        entity_id: Entity ID to update
+        properties: JSON object of properties to set/merge
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    ent_el = cb.find_child(room, "entities")
+    if ent_el is None:
+        return "No entities in this room."
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {properties}"
+    if not isinstance(props, dict):
+        return "properties must be a JSON object."
+
+    target = None
+    for e in ent_el.get("__children", []):
+        if e.get("id") == entity_id:
+            target = e
+            break
+
+    if target is None:
+        return f"Entity id={entity_id} not found in '{room_name}'."
+
+    _protected = frozenset(("__name", "__children", "id"))
+    updated = []
+    cleared = []
+    for k, v in props.items():
+        if k in _protected:
+            continue
+        if v is None:
+            if k in target:
+                del target[k]
+                cleared.append(k)
+        else:
+            target[k] = v
+            updated.append(k)
+
+    cb.write_map(path, data)
+    parts = []
+    if updated:
+        parts.append(f"set {', '.join(updated)}")
+    if cleared:
+        parts.append(f"cleared {', '.join(cleared)}")
+    return (
+        f"Updated entity '{target.get('__name', '?')}' id={entity_id}: "
+        f"{'; '.join(parts) if parts else 'no changes'}."
+    )
+
+
+@mcp.tool()
+def move_entity(
+    map_path: str,
+    room_name: str,
+    entity_id: int,
+    new_x: int,
+    new_y: int,
+) -> str:
+    """Move an entity to a new position within a room.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        entity_id: Entity ID to move
+        new_x: New X position in pixels
+        new_y: New Y position in pixels
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    ent_el = cb.find_child(room, "entities")
+    if ent_el is None:
+        return "No entities in this room."
+
+    for e in ent_el.get("__children", []):
+        if e.get("id") == entity_id:
+            old_x, old_y = e.get("x", 0), e.get("y", 0)
+            e["x"] = new_x
+            e["y"] = new_y
+            cb.write_map(path, data)
+            return (
+                f"Moved '{e.get('__name', '?')}' id={entity_id} from "
+                f"({old_x},{old_y}) to ({new_x},{new_y})."
+            )
+
+    return f"Entity id={entity_id} not found."
+
+
+@mcp.tool()
+def update_room(
+    map_path: str,
+    room_name: str,
+    properties: str = "{}",
+) -> str:
+    """Update room-level properties (music, dark, space, wind, etc.).
+
+    Supported properties include: music, alt_music, ambience, dark, space,
+    underwater, whisper, windPattern, cameraOffsetX, cameraOffsetY, etc.
+    Pass null to reset a key to its default.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        properties: JSON object of room properties to set
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {properties}"
+
+    _protected = frozenset(("__name", "__children", "name", "x", "y", "width", "height"))
+    updated = []
+    for k, v in props.items():
+        if k in _protected:
+            continue
+        room[k] = v
+        updated.append(k)
+
+    cb.write_map(path, data)
+    return (
+        f"Updated room '{room.get('name')}': "
+        f"set {', '.join(updated) if updated else 'nothing'}."
+    )
+
+
+@mcp.tool()
+def clone_room(
+    map_path: str,
+    source_room: str,
+    new_room_name: str,
+    new_x: int = -1,
+    new_y: int = -1,
+) -> str:
+    """Clone a room: duplicate all tiles, entities, triggers, decals.
+
+    Creates an exact copy with a new name and optional new position.
+    Entity IDs are re-assigned to avoid collisions.
+
+    Args:
+        map_path: Path to the .bin file
+        source_room: Name of the room to clone
+        new_room_name: Name for the cloned room
+        new_x: X position for the clone (-1 = offset right from source)
+        new_y: Y position for the clone (-1 = same Y as source)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    src = cb.get_room(data, source_room)
+
+    if src is None:
+        return f"Source room '{source_room}' not found."
+
+    levels = cb.find_child(data, "levels")
+    if levels is None:
+        return "Invalid map."
+
+    name = new_room_name if new_room_name.startswith("lvl_") else f"lvl_{new_room_name}"
+    for r in cb.get_rooms(data):
+        if r.get("name") == name:
+            return f"Room '{name}' already exists."
+
+    clone = copy.deepcopy(src)
+    clone["name"] = name
+    if new_x >= 0:
+        clone["x"] = new_x
+    else:
+        clone["x"] = src.get("x", 0) + src.get("width", 320) + 8
+    if new_y >= 0:
+        clone["y"] = new_y
+
+    # Re-assign entity and trigger IDs
+    next_id = 1
+    for section in ("entities", "triggers"):
+        el = cb.find_child(clone, section)
+        if el:
+            for child in el.get("__children", []):
+                child["id"] = next_id
+                next_id += 1
+
+    levels["__children"].append(clone)
+    cb.write_map(path, data)
+
+    return (
+        f"Cloned '{source_room}' as '{name}' at "
+        f"({clone['x']},{clone['y']})."
+    )
+
+
+@mcp.tool()
+def batch_add_entities(
+    map_path: str,
+    room_name: str,
+    entities: str,
+) -> str:
+    """Add multiple entities to a room at once.
+
+    More efficient than calling add_entity multiple times.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        entities: JSON array of entity objects, each with at least
+            "name" (entity type), "x", and "y". Optional: "width",
+            "height", and any extra properties.
+            Example: '[{"name":"strawberry","x":100,"y":50},
+                       {"name":"spinner","x":200,"y":60}]'
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    try:
+        ent_list = json.loads(entities)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {entities}"
+    if not isinstance(ent_list, list):
+        return "entities must be a JSON array."
+
+    ent_el = cb.find_child(room, "entities")
+    if ent_el is None:
+        ent_el = {"__name": "entities", "__children": []}
+        room["__children"].append(ent_el)
+
+    next_id = _next_entity_id(room)
+    added = 0
+    _protected = frozenset(("__name", "__children", "id", "name"))
+
+    for item in ent_list:
+        if not isinstance(item, dict):
+            continue
+        ename = item.get("name", "")
+        if not ename:
+            continue
+        entity: dict = {
+            "__name": ename,
+            "__children": [],
+            "id": next_id,
+            "x": int(item.get("x", 0)),
+            "y": int(item.get("y", 0)),
+        }
+        if item.get("width"):
+            entity["width"] = int(item["width"])
+        if item.get("height"):
+            entity["height"] = int(item["height"])
+        for k, v in item.items():
+            if k not in _protected and k not in ("x", "y", "width", "height"):
+                entity[k] = v
+        ent_el["__children"].append(entity)
+        next_id += 1
+        added += 1
+
+    cb.write_map(path, data)
+    return f"Added {added} entities to room '{room_name}'."
+
+
+@mcp.tool()
+def resize_room(
+    map_path: str,
+    room_name: str,
+    new_width: int,
+    new_height: int,
+) -> str:
+    """Resize a room, adjusting tile grids accordingly.
+
+    Expands or shrinks the tile data to match the new dimensions.
+    Expansion fills with air tiles; shrinking crops from the right/bottom.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        new_width: New width in pixels (must be multiple of 8)
+        new_height: New height in pixels (must be multiple of 8)
+    """
+    if new_width % 8 != 0 or new_height % 8 != 0:
+        return "Width and height must be multiples of 8."
+    if new_width <= 0 or new_height <= 0:
+        return "Width and height must be positive."
+
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    old_w = room.get("width", 320)
+    old_h = room.get("height", 184)
+    room["width"] = new_width
+    room["height"] = new_height
+
+    new_tw, new_th = new_width // 8, new_height // 8
+
+    for child_name in ("solids", "bg"):
+        el = cb.find_child(room, child_name)
+        if el is None:
+            continue
+        text = el.get("innerText", "")
+        rows = text.split("\n")
+
+        # Adjust columns
+        adjusted = []
+        for row in rows:
+            if len(row) < new_tw:
+                adjusted.append(row + "0" * (new_tw - len(row)))
+            else:
+                adjusted.append(row[:new_tw])
+
+        # Adjust rows
+        while len(adjusted) < new_th:
+            adjusted.append("0" * new_tw)
+        adjusted = adjusted[:new_th]
+
+        el["innerText"] = "\n".join(adjusted)
+
+    for child_name in ("objtiles", "fgtiles", "bgtiles"):
+        el = cb.find_child(room, child_name)
+        if el is None:
+            continue
+        text = el.get("innerText", "")
+        rows = text.split("\n")
+        adjusted = []
+        for row in rows:
+            cols_list = row.split(",")
+            while len(cols_list) < new_tw:
+                cols_list.append("-1")
+            adjusted.append(",".join(cols_list[:new_tw]))
+        while len(adjusted) < new_th:
+            adjusted.append(",".join(["-1"] * new_tw))
+        adjusted = adjusted[:new_th]
+        el["innerText"] = "\n".join(adjusted)
+
+    cb.write_map(path, data)
+    return (
+        f"Resized room '{room.get('name')}' from "
+        f"{old_w}x{old_h} to {new_width}x{new_height}."
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DECAL TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def list_decals(map_path: str, room_name: str, layer: str = "fg") -> str:
+    """List all decals in a room (foreground or background).
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        layer: "fg" for fgdecals, "bg" for bgdecals
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    dec_name = "fgdecals" if layer == "fg" else "bgdecals"
+    dec_el = cb.find_child(room, dec_name)
+    if dec_el is None or not dec_el.get("__children"):
+        return f"No {layer} decals in room '{room_name}'."
+
+    decs = dec_el["__children"]
+    lines = [f"{dec_name} in {room.get('name', '?')} ({len(decs)}):"]
+    for i, d in enumerate(decs):
+        lines.append(
+            f"  [{i}] {d.get('texture', '?')} "
+            f"({d.get('x', 0)},{d.get('y', 0)}) "
+            f"scale=({d.get('scaleX', 1)},{d.get('scaleY', 1)})"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_decal(
+    map_path: str,
+    room_name: str,
+    texture: str,
+    x: int,
+    y: int,
+    layer: str = "fg",
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+) -> str:
+    """Add a foreground or background decal to a room.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        texture: Decal texture path (e.g. "decals/1-forsakencity/flag_a00")
+        x: X position in pixels
+        y: Y position in pixels
+        layer: "fg" or "bg"
+        scale_x: Horizontal scale (default 1.0)
+        scale_y: Vertical scale (default 1.0)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    dec_name = "fgdecals" if layer == "fg" else "bgdecals"
+    dec_el = cb.find_child(room, dec_name)
+    if dec_el is None:
+        dec_el = {"__name": dec_name, "__children": []}
+        room["__children"].append(dec_el)
+
+    decal: dict = {
+        "__name": "decal",
+        "__children": [],
+        "texture": texture,
+        "x": x,
+        "y": y,
+        "scaleX": scale_x,
+        "scaleY": scale_y,
+    }
+    dec_el["__children"].append(decal)
+    cb.write_map(path, data)
+
+    return f"Added {layer} decal '{texture}' at ({x},{y}) to '{room_name}'."
+
+
+@mcp.tool()
+def remove_decal(
+    map_path: str,
+    room_name: str,
+    index: int,
+    layer: str = "fg",
+) -> str:
+    """Remove a decal from a room by its index.
+
+    Use list_decals first to see the indices.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        index: 0-based index of the decal
+        layer: "fg" or "bg"
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    dec_name = "fgdecals" if layer == "fg" else "bgdecals"
+    dec_el = cb.find_child(room, dec_name)
+    if dec_el is None:
+        return f"No {layer} decals in this room."
+
+    children = dec_el.get("__children", [])
+    if not (0 <= index < len(children)):
+        return f"Index {index} out of range (room has {len(children)} {layer} decals)."
+
+    removed = children.pop(index)
+    cb.write_map(path, data)
+    return f"Removed {layer} decal '{removed.get('texture', '?')}' at index {index}."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ADVANCED ANALYSIS TOOLS (gdep-inspired)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def analyze_entity_usage(map_path: str) -> str:
+    """Cross-room entity usage statistics — which entity types appear where.
+
+    Inspired by gdep's detect_patterns. Shows how frequently each entity
+    type is used across the map and in which rooms, revealing design
+    patterns and potential inconsistencies.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    type_rooms: dict[str, list[str]] = {}
+    type_counts: dict[str, int] = {}
+
+    for room in rooms:
+        rname = room.get("name", "?")
+        ent_el = cb.find_child(room, "entities")
+        if not ent_el:
+            continue
+        for e in ent_el.get("__children", []):
+            t = e.get("__name", "unknown")
+            type_counts[t] = type_counts.get(t, 0) + 1
+            if t not in type_rooms:
+                type_rooms[t] = []
+            if rname not in type_rooms[t]:
+                type_rooms[t].append(rname)
+
+    if not type_counts:
+        return "No entities found in this map."
+
+    total = sum(type_counts.values())
+    sorted_types = sorted(type_counts.items(), key=lambda x: -x[1])
+
+    lines = [
+        f"Entity Usage Analysis: {data.get('_package', '?')}",
+        f"Total entities: {total}",
+        f"Unique types: {len(type_counts)}",
+        f"Rooms: {len(rooms)}",
+        "",
+        f"{'Entity Type':<35} {'Count':>6} {'Rooms':>6} {'Spread':>8}",
+        "─" * 60,
+    ]
+
+    for t, count in sorted_types[:40]:
+        room_list = type_rooms.get(t, [])
+        spread = f"{len(room_list)}/{len(rooms)}"
+        lines.append(f"  {t:<33} {count:>6} {len(room_list):>6} {spread:>8}")
+
+        if len(sorted_types) <= 15 and room_list:
+            rooms_str = ", ".join(r.replace("lvl_", "") for r in room_list[:8])
+            if len(room_list) > 8:
+                rooms_str += f" +{len(room_list) - 8}"
+            lines.append(f"    rooms: {rooms_str}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def analyze_difficulty(map_path: str, room_name: str = "") -> str:
+    """Estimate difficulty for a room or the entire map.
+
+    Uses entity density, hazard count, tile coverage, room dimensions,
+    and presence of navigation aids to compute a difficulty score.
+    Inspired by gdep's architectural health analysis adapted for
+    Celeste level design.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Optional room name. If empty, analyzes all rooms.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+
+    if room_name:
+        room = cb.get_room(data, room_name)
+        if room is None:
+            return f"Room '{room_name}' not found."
+        rooms = [room]
+    else:
+        rooms = cb.get_rooms(data)
+
+    if not rooms:
+        return "No rooms to analyze."
+
+    results: list[str] = []
+
+    for room in rooms:
+        rname = room.get("name", "?")
+        w = room.get("width", 320)
+        h = room.get("height", 184)
+        area = w * h
+
+        ent_el = cb.find_child(room, "entities")
+        ents = ent_el.get("__children", []) if ent_el else []
+
+        hazards = sum(1 for e in ents if e.get("__name", "") in pcg._HAZARD_ENTITIES)
+        collectibles = sum(1 for e in ents if e.get("__name", "") in pcg._COLLECTIBLE_ENTITIES)
+        nav_aids = sum(1 for e in ents if e.get("__name", "") in pcg._NAV_ENTITIES)
+
+        tile_info = pcg._analyze_tiles(room)
+        solid_pct = tile_info.get("solid_pct", 0)
+
+        # Difficulty heuristic (0-10)
+        score = 0.0
+        density = len(ents) / (area / 10000) if area > 0 else 0
+        score += min(hazards * 0.8, 4.0)
+        score += min(density * 0.3, 2.0)
+        score -= min(nav_aids * 0.3, 1.5)
+        if solid_pct > 0.4:
+            score += 1.0
+        if solid_pct < 0.1:
+            score += 0.5
+        if room.get("dark", False):
+            score += 1.0
+        if room.get("space", False):
+            score += 0.5
+        wind = room.get("windPattern", "None")
+        if wind not in ("None", ""):
+            score += 0.5
+        score = max(0.0, min(10.0, score))
+
+        if score < 2:
+            label = "Easy"
+        elif score < 4:
+            label = "Moderate"
+        elif score < 6:
+            label = "Hard"
+        elif score < 8:
+            label = "Expert"
+        else:
+            label = "Extreme"
+
+        results.append(
+            f"  {rname.replace('lvl_', ''):<20} "
+            f"score={score:.1f}/10 ({label})"
+            f"  hazards={hazards} nav={nav_aids} "
+            f"collectibles={collectibles} solid={solid_pct:.0%}"
+        )
+
+    header = f"Difficulty Analysis: {data.get('_package', '?')}"
+    if len(rooms) > 1:
+        scores = []
+        for line in results:
+            idx = line.index("score=") + 6
+            end = line.index("/10", idx)
+            scores.append(float(line[idx:end]))
+        avg = sum(scores) / len(scores)
+        header += f"\nAverage difficulty: {avg:.1f}/10"
+        header += f"\nRange: {min(scores):.1f} – {max(scores):.1f}"
+
+    return header + "\n\n" + "\n".join(results)
+
+
+@mcp.tool()
+def find_entity_references(map_path: str, entity_type: str) -> str:
+    """Find all rooms that contain a specific entity type.
+
+    Inspired by gdep's find_method_callers — reverse-lookup for entity
+    usage. Shows where an entity type is placed, with positions and counts.
+
+    Args:
+        map_path: Path to the .bin file
+        entity_type: Entity type to search for (e.g. "strawberry")
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+    et_lower = entity_type.lower()
+
+    results: list[str] = []
+    total = 0
+
+    for room in rooms:
+        rname = room.get("name", "?")
+        ent_el = cb.find_child(room, "entities")
+        if not ent_el:
+            continue
+        matches = [
+            e for e in ent_el.get("__children", [])
+            if e.get("__name", "").lower() == et_lower
+        ]
+        if not matches:
+            continue
+        total += len(matches)
+        positions = [f"({e.get('x', 0)},{e.get('y', 0)})" for e in matches[:5]]
+        pos_str = ", ".join(positions)
+        if len(matches) > 5:
+            pos_str += f" +{len(matches) - 5} more"
+        results.append(f"  {rname}: {len(matches)} instance(s) at {pos_str}")
+
+    if not results:
+        return f"No instances of '{entity_type}' found in any room."
+
+    return (
+        f"Entity '{entity_type}' — {total} total across {len(results)} rooms:\n"
+        + "\n".join(results)
+    )
+
+
+@mcp.tool()
+def detect_map_patterns(map_path: str) -> str:
+    """Detect gameplay design patterns in a map.
+
+    Inspired by gdep's detect_patterns. Scans for common Celeste level
+    design patterns such as: hub-and-spoke room layouts, linear progression,
+    collectible-gated rooms, tutorial sequences, wind corridors, etc.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    if not rooms:
+        return "No rooms in this map."
+
+    patterns: list[str] = []
+
+    # Check for linear progression
+    xs = sorted(r.get("x", 0) for r in rooms)
+    ys = sorted(r.get("y", 0) for r in rooms)
+    x_range = xs[-1] - xs[0] if xs else 0
+    y_range = ys[-1] - ys[0] if ys else 0
+
+    if len(rooms) > 2:
+        if x_range > y_range * 3:
+            patterns.append(
+                "LINEAR_HORIZONTAL: Rooms are primarily arranged left-to-right"
+            )
+        elif y_range > x_range * 3:
+            patterns.append(
+                "LINEAR_VERTICAL: Rooms are primarily arranged top-to-bottom"
+            )
+        elif x_range > 0 and y_range > 0 and abs(x_range - y_range) / max(x_range, y_range) < 0.3:
+            patterns.append(
+                "GRID_LAYOUT: Rooms span roughly equal horizontal and vertical space"
+            )
+
+    # Check for collectible density
+    total_collectibles = 0
+    rooms_with_collectibles = 0
+    for room in rooms:
+        ent_el = cb.find_child(room, "entities")
+        if not ent_el:
+            continue
+        coll = sum(
+            1 for e in ent_el.get("__children", [])
+            if e.get("__name", "") in pcg._COLLECTIBLE_ENTITIES
+        )
+        if coll > 0:
+            rooms_with_collectibles += 1
+            total_collectibles += coll
+
+    if total_collectibles > 0:
+        density = rooms_with_collectibles / len(rooms) if rooms else 0
+        if density > 0.7:
+            patterns.append(
+                f"COLLECTIBLE_RICH: {total_collectibles} collectibles in "
+                f"{rooms_with_collectibles}/{len(rooms)} rooms ({density:.0%} coverage)"
+            )
+        elif total_collectibles > 0:
+            patterns.append(
+                f"COLLECTIBLE_SPARSE: {total_collectibles} collectibles in "
+                f"{rooms_with_collectibles}/{len(rooms)} rooms"
+            )
+
+    # Check for dark/space themed sections
+    dark_rooms = [r for r in rooms if r.get("dark", False)]
+    space_rooms = [r for r in rooms if r.get("space", False)]
+    if dark_rooms:
+        patterns.append(
+            f"DARK_SECTION: {len(dark_rooms)} dark room(s) — "
+            + ", ".join(r.get("name", "?").replace("lvl_", "") for r in dark_rooms[:5])
+        )
+    if space_rooms:
+        patterns.append(
+            f"SPACE_SECTION: {len(space_rooms)} space-physics room(s) — "
+            + ", ".join(r.get("name", "?").replace("lvl_", "") for r in space_rooms[:5])
+        )
+
+    # Check for wind corridors
+    wind_rooms = [r for r in rooms if r.get("windPattern", "None") not in ("None", "")]
+    if wind_rooms:
+        wind_types = {r.get("windPattern") for r in wind_rooms}
+        patterns.append(
+            f"WIND_CORRIDOR: {len(wind_rooms)} room(s) with wind — "
+            f"types: {', '.join(str(w) for w in wind_types)}"
+        )
+
+    # Check for hazard-heavy rooms
+    hazard_rooms = []
+    for room in rooms:
+        ent_el = cb.find_child(room, "entities")
+        if not ent_el:
+            continue
+        haz = sum(
+            1 for e in ent_el.get("__children", [])
+            if e.get("__name", "") in pcg._HAZARD_ENTITIES
+        )
+        if haz > 8:
+            hazard_rooms.append((room.get("name", "?"), haz))
+    if hazard_rooms:
+        patterns.append(
+            f"HAZARD_DENSE: {len(hazard_rooms)} room(s) with 8+ hazards — "
+            + ", ".join(f"{n.replace('lvl_', '')}({c})" for n, c in hazard_rooms[:5])
+        )
+
+    # Tutorial detection (player spawn + few entities + small room)
+    for room in rooms:
+        ent_el = cb.find_child(room, "entities")
+        if not ent_el:
+            continue
+        ents = ent_el.get("__children", [])
+        has_player = any(e.get("__name") == "player" for e in ents)
+        if has_player and len(ents) <= 5 and room.get("width", 0) <= 320:
+            patterns.append(
+                f"TUTORIAL_START: '{room.get('name', '?').replace('lvl_', '')}' "
+                f"has player spawn with minimal entities (likely intro room)"
+            )
+            break
+
+    # Check for styleground variety
+    style = cb.find_child(data, "Style")
+    if style:
+        fg = cb.find_child(style, "Foregrounds")
+        bg = cb.find_child(style, "Backgrounds")
+        fg_n = len(fg.get("__children", [])) if fg else 0
+        bg_n = len(bg.get("__children", [])) if bg else 0
+        if fg_n + bg_n > 10:
+            patterns.append(
+                f"RICH_VISUALS: {fg_n} FG + {bg_n} BG stylegrounds — "
+                "heavy visual layering"
+            )
+
+    if not patterns:
+        patterns.append("NO_STRONG_PATTERNS: Map doesn't match common Celeste design archetypes")
+
+    lines = [
+        f"Map Pattern Analysis: {data.get('_package', '?')}",
+        f"Rooms: {len(rooms)}",
+        "",
+        f"Detected {len(patterns)} pattern(s):",
+        "",
+    ]
+    for p in patterns:
+        lines.append(f"  {p}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def analyze_room_connectivity(map_path: str) -> str:
+    """Analyze how rooms connect to each other based on adjacency.
+
+    Inspects room positions and sizes to determine which rooms border
+    each other, forming the navigable graph of the map. Reports
+    isolated rooms and potential dead ends.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    if not rooms:
+        return "No rooms in this map."
+
+    # Build adjacency by checking if rooms share an edge (within 8px tolerance)
+    TOLERANCE = 8
+    adjacency: dict[str, list[str]] = {r.get("name", "?"): [] for r in rooms}
+
+    for i, ra in enumerate(rooms):
+        ax, ay = ra.get("x", 0), ra.get("y", 0)
+        aw, ah = ra.get("width", 0), ra.get("height", 0)
+
+        for j, rb in enumerate(rooms):
+            if i >= j:
+                continue
+            bx, by = rb.get("x", 0), rb.get("y", 0)
+            bw, bh = rb.get("width", 0), rb.get("height", 0)
+
+            # Check horizontal adjacency
+            h_adj = (
+                abs((ax + aw) - bx) <= TOLERANCE or
+                abs((bx + bw) - ax) <= TOLERANCE
+            )
+            h_overlap = not (ay + ah <= by or by + bh <= ay)
+
+            # Check vertical adjacency
+            v_adj = (
+                abs((ay + ah) - by) <= TOLERANCE or
+                abs((by + bh) - ay) <= TOLERANCE
+            )
+            v_overlap = not (ax + aw <= bx or bx + bw <= ax)
+
+            if (h_adj and h_overlap) or (v_adj and v_overlap):
+                na = ra.get("name", "?")
+                nb = rb.get("name", "?")
+                adjacency[na].append(nb)
+                adjacency[nb].append(na)
+
+    lines = [
+        f"Room Connectivity: {data.get('_package', '?')}",
+        f"Total rooms: {len(rooms)}",
+        "",
+    ]
+
+    isolated = [n for n, adj in adjacency.items() if not adj]
+    dead_ends = [n for n, adj in adjacency.items() if len(adj) == 1]
+    hubs = [(n, len(adj)) for n, adj in adjacency.items() if len(adj) >= 3]
+
+    if isolated:
+        lines.append(f"Isolated rooms (no neighbors): {len(isolated)}")
+        for n in isolated:
+            lines.append(f"  {n.replace('lvl_', '')}")
+        lines.append("")
+
+    if dead_ends:
+        lines.append(f"Dead ends (1 neighbor): {len(dead_ends)}")
+        for n in dead_ends:
+            neighbor = adjacency[n][0].replace("lvl_", "")
+            lines.append(f"  {n.replace('lvl_', '')} -> {neighbor}")
+        lines.append("")
+
+    if hubs:
+        hubs.sort(key=lambda x: -x[1])
+        lines.append(f"Hub rooms (3+ neighbors): {len(hubs)}")
+        for n, count in hubs:
+            neighbors = ", ".join(a.replace("lvl_", "") for a in adjacency[n])
+            lines.append(f"  {n.replace('lvl_', '')} ({count} connections): {neighbors}")
+        lines.append("")
+
+    lines.append("Full adjacency:")
+    for name in sorted(adjacency):
+        adj_names = ", ".join(a.replace("lvl_", "") for a in adjacency[name])
+        lines.append(f"  {name.replace('lvl_', '')} -> {adj_names or '(none)'}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def suggest_improvements(map_path: str, room_name: str) -> str:
+    """Suggest level design improvements for a room.
+
+    Inspired by gdep's suggest_lint_fixes. Checks for common Celeste
+    level design issues and suggests fixes, such as: missing checkpoints,
+    too few/many entities, inconsistent difficulty, missing navigation aids.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    rname = room.get("name", "?")
+    w = room.get("width", 320)
+    h = room.get("height", 184)
+
+    ent_el = cb.find_child(room, "entities")
+    ents = ent_el.get("__children", []) if ent_el else []
+
+    trig_el = cb.find_child(room, "triggers")
+    trigs = trig_el.get("__children", []) if trig_el else []
+
+    tile_info = pcg._analyze_tiles(room)
+    solid_pct = tile_info.get("solid_pct", 0)
+
+    entity_names = [e.get("__name", "") for e in ents]
+    has_player = "player" in entity_names
+    has_checkpoint = "checkpoint" in entity_names
+
+    hazards = sum(1 for n in entity_names if n in pcg._HAZARD_ENTITIES)
+    nav_aids = sum(1 for n in entity_names if n in pcg._NAV_ENTITIES)
+
+    suggestions: list[str] = []
+
+    # Missing floor
+    if not tile_info.get("has_floor", False):
+        suggestions.append(
+            "ADD_FLOOR: Room has no solid floor tiles. Consider adding ground "
+            "tiles to prevent players from falling out of bounds."
+        )
+
+    # Large room with no checkpoint
+    area = w * h
+    if area > 320 * 184 * 2 and not has_checkpoint:
+        suggestions.append(
+            "ADD_CHECKPOINT: Large room without a checkpoint. Players may "
+            "lose significant progress on death."
+        )
+
+    # High hazard density without navigation aids
+    if hazards > 5 and nav_aids == 0:
+        suggestions.append(
+            f"ADD_NAV_AIDS: Room has {hazards} hazards but no navigation "
+            "aids (springs, refills, jump-throughs). Consider adding springs "
+            "or refills to make the challenge fair."
+        )
+
+    # Very sparse room
+    if len(ents) < 2 and w >= 320 and not has_player:
+        suggestions.append(
+            "ADD_CONTENT: Room is very sparse (< 2 entities). Consider "
+            "adding gameplay elements to make it interesting."
+        )
+
+    # Very dense room
+    if len(ents) > 50:
+        suggestions.append(
+            f"REDUCE_DENSITY: Room has {len(ents)} entities — this may "
+            "cause performance issues or visual clutter."
+        )
+
+    # No triggers in interactive room
+    if hazards > 0 and len(trigs) == 0:
+        suggestions.append(
+            "ADD_TRIGGERS: Room has hazards but no triggers. Consider "
+            "adding music/camera triggers for polish."
+        )
+
+    # Solid percentage extremes
+    if solid_pct > 0.7:
+        suggestions.append(
+            f"REDUCE_TILES: {solid_pct:.0%} tile coverage is very high. "
+            "The room may feel cramped."
+        )
+    elif solid_pct < 0.05 and not room.get("space", False):
+        suggestions.append(
+            f"ADD_PLATFORMS: Only {solid_pct:.0%} tile coverage. The room "
+            "needs more platforms for the player to land on."
+        )
+
+    # Dark room without lighting cues
+    if room.get("dark", False) and not any(
+        e.get("__name", "").lower().startswith("torch")
+        or e.get("__name", "").lower().startswith("lamp")
+        or e.get("__name", "").lower().startswith("light")
+        for e in ents
+    ):
+        suggestions.append(
+            "ADD_LIGHTING: Dark room without visible light sources. "
+            "Consider adding torch/lamp entities for visual guidance."
+        )
+
+    if not suggestions:
+        return f"Room '{rname}': No improvement suggestions — looks good!"
+
+    lines = [
+        f"Suggestions for '{rname}' ({w}x{h}, {len(ents)} entities):",
+        "",
+    ]
+    for s in suggestions:
+        lines.append(f"  {s}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def compare_maps(
+    map_path_a: str,
+    map_path_b: str,
+) -> str:
+    """Compare two maps side by side: room counts, entity totals, complexity.
+
+    Inspired by gdep's summarize_project_diff. Useful for comparing
+    different versions of a map or different maps in a mod.
+
+    Args:
+        map_path_a: Path to the first .bin file
+        map_path_b: Path to the second .bin file
+    """
+    pa = _resolve(map_path_a)
+    pb = _resolve(map_path_b)
+
+    if not pa.exists():
+        return f"File not found: {map_path_a}"
+    if not pb.exists():
+        return f"File not found: {map_path_b}"
+
+    da = cb.read_map(pa)
+    db = cb.read_map(pb)
+    ra = cb.get_rooms(da)
+    rb = cb.get_rooms(db)
+
+    def _map_stats(data: dict, rooms: list, path: Path) -> dict:
+        total_ent = total_trig = total_dec = 0
+        ent_types: set[str] = set()
+        for room in rooms:
+            for section in ("entities", "triggers"):
+                el = cb.find_child(room, section)
+                if not el:
+                    continue
+                n = len(el.get("__children", []))
+                if section == "entities":
+                    total_ent += n
+                    for e in el.get("__children", []):
+                        ent_types.add(e.get("__name", ""))
+                else:
+                    total_trig += n
+            for dec_section in ("fgdecals", "bgdecals"):
+                el = cb.find_child(room, dec_section)
+                if el:
+                    total_dec += len(el.get("__children", []))
+
+        style = cb.find_child(data, "Style")
+        fg_n = bg_n = 0
+        if style:
+            fg = cb.find_child(style, "Foregrounds")
+            bg = cb.find_child(style, "Backgrounds")
+            fg_n = len(fg.get("__children", [])) if fg else 0
+            bg_n = len(bg.get("__children", [])) if bg else 0
+
+        return {
+            "package": data.get("_package", "?"),
+            "size_kb": path.stat().st_size / 1024,
+            "rooms": len(rooms),
+            "entities": total_ent,
+            "triggers": total_trig,
+            "decals": total_dec,
+            "entity_types": len(ent_types),
+            "stylegrounds": fg_n + bg_n,
+        }
+
+    sa = _map_stats(da, ra, pa)
+    sb = _map_stats(db, rb, pb)
+
+    lines = [
+        f"{'Metric':<25} {'Map A':>15} {'Map B':>15} {'Diff':>10}",
+        "─" * 67,
+        f"{'Package':<25} {sa['package']:>15} {sb['package']:>15}",
+        f"{'File size (KB)':<25} {sa['size_kb']:>15.1f} {sb['size_kb']:>15.1f} {sb['size_kb']-sa['size_kb']:>+10.1f}",
+        f"{'Rooms':<25} {sa['rooms']:>15} {sb['rooms']:>15} {sb['rooms']-sa['rooms']:>+10}",
+        f"{'Entities':<25} {sa['entities']:>15} {sb['entities']:>15} {sb['entities']-sa['entities']:>+10}",
+        f"{'Triggers':<25} {sa['triggers']:>15} {sb['triggers']:>15} {sb['triggers']-sa['triggers']:>+10}",
+        f"{'Decals':<25} {sa['decals']:>15} {sb['decals']:>15} {sb['decals']-sa['decals']:>+10}",
+        f"{'Unique entity types':<25} {sa['entity_types']:>15} {sb['entity_types']:>15} {sb['entity_types']-sa['entity_types']:>+10}",
+        f"{'Stylegrounds':<25} {sa['stylegrounds']:>15} {sb['stylegrounds']:>15} {sb['stylegrounds']-sa['stylegrounds']:>+10}",
+    ]
+
+    # Room name overlap
+    names_a = {r.get("name") for r in ra}
+    names_b = {r.get("name") for r in rb}
+    shared = names_a & names_b
+    only_a = names_a - names_b
+    only_b = names_b - names_a
+    lines.append("")
+    lines.append(f"Shared rooms: {len(shared)}")
+    if only_a:
+        lines.append(f"Only in A ({len(only_a)}): " + ", ".join(sorted(n.replace("lvl_", "") for n in only_a)[:10]))
+    if only_b:
+        lines.append(f"Only in B ({len(only_b)}): " + ", ".join(sorted(n.replace("lvl_", "") for n in only_b)[:10]))
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  WIKI / ANALYSIS CACHE TOOLS (gdep-inspired)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Wiki stores analysis results locally so repeated queries are instant.
+_WIKI_DIR_NAME = ".loenn_mcp_wiki"
+
+
+def _wiki_dir() -> Path:
+    d = WORKSPACE / _WIKI_DIR_NAME
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _wiki_index_path() -> Path:
+    return _wiki_dir() / "index.json"
+
+
+def _load_wiki_index() -> dict:
+    idx_path = _wiki_index_path()
+    if idx_path.exists():
+        try:
+            return json.loads(idx_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"nodes": {}}
+
+
+def _save_wiki_index(index: dict) -> None:
+    _wiki_index_path().write_text(
+        json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+@mcp.tool()
+def wiki_save(
+    key: str,
+    content: str,
+    category: str = "analysis",
+    tags: str = "",
+) -> str:
+    """Save analysis results or session notes to the local wiki cache.
+
+    Inspired by gdep's wiki_save_conversation. Persists analysis findings
+    across sessions so you don't have to re-analyze the same maps.
+
+    Args:
+        key: Unique key for this wiki entry (e.g. "map:01_City_A",
+            "room:a-03:difficulty", "entity:strawberry:locations")
+        content: The analysis content to store
+        category: Category tag (default: "analysis")
+        tags: Comma-separated tags for filtering
+    """
+    index = _load_wiki_index()
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+    entry = {
+        "key": key,
+        "category": category,
+        "tags": tag_list,
+        "updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "size": len(content),
+    }
+
+    # Save content to file
+    safe_key = re.sub(r"[^\w\-.]", "_", key)
+    content_path = _wiki_dir() / f"{safe_key}.txt"
+    content_path.write_text(content, encoding="utf-8")
+    entry["file"] = content_path.name
+
+    index["nodes"][key] = entry
+    _save_wiki_index(index)
+
+    return f"Wiki entry saved: '{key}' ({len(content)} chars, category={category})"
+
+
+@mcp.tool()
+def wiki_search(query: str, category: str = "") -> str:
+    """Search the local wiki cache for previously saved analysis results.
+
+    Inspired by gdep's wiki_search with FTS-style keyword matching.
+    Searches keys, tags, and content for matches.
+
+    Args:
+        query: Search query (searches keys, tags, and content)
+        category: Optional category filter
+    """
+    index = _load_wiki_index()
+    nodes = index.get("nodes", {})
+
+    if not nodes:
+        return "Wiki is empty. Use wiki_save to store analysis results."
+
+    q_lower = query.lower()
+    results: list[tuple[str, dict, str]] = []
+
+    for key, entry in nodes.items():
+        # Check key match
+        score = 0
+        if q_lower in key.lower():
+            score += 3
+        if any(q_lower in t.lower() for t in entry.get("tags", [])):
+            score += 2
+        if category and entry.get("category") != category:
+            continue
+
+        # Check content match
+        content_file = entry.get("file", "")
+        content = ""
+        if content_file:
+            fp = _wiki_dir() / content_file
+            if fp.exists():
+                content = fp.read_text(encoding="utf-8", errors="replace")
+                if q_lower in content.lower():
+                    score += 1
+
+        if score > 0:
+            preview = content[:200].replace("\n", " ") if content else "(no content)"
+            results.append((key, entry, preview))
+
+    if not results:
+        return f"No wiki entries matching '{query}'."
+
+    lines = [f"Wiki search results for '{query}' ({len(results)} matches):"]
+    for key, entry, preview in results[:20]:
+        lines.append(
+            f"\n  [{key}] ({entry.get('category', '?')}) "
+            f"updated={entry.get('updated', '?')}"
+        )
+        lines.append(f"    {preview}...")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def wiki_list(category: str = "") -> str:
+    """List all wiki cache entries with metadata.
+
+    Args:
+        category: Optional category filter
+    """
+    index = _load_wiki_index()
+    nodes = index.get("nodes", {})
+
+    if not nodes:
+        return "Wiki is empty."
+
+    entries = list(nodes.items())
+    if category:
+        entries = [(k, v) for k, v in entries if v.get("category") == category]
+
+    if not entries:
+        return f"No wiki entries in category '{category}'."
+
+    lines = [f"Wiki entries ({len(entries)}):"]
+    for key, entry in sorted(entries, key=lambda x: x[1].get("updated", ""), reverse=True):
+        tags_str = ", ".join(entry.get("tags", [])) if entry.get("tags") else ""
+        lines.append(
+            f"  [{key}] category={entry.get('category', '?')} "
+            f"size={entry.get('size', 0)} "
+            f"updated={entry.get('updated', '?')}"
+            + (f" tags={tags_str}" if tags_str else "")
+        )
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def wiki_get(key: str) -> str:
+    """Retrieve a specific wiki entry by key.
+
+    Args:
+        key: The wiki entry key to retrieve
+    """
+    index = _load_wiki_index()
+    entry = index.get("nodes", {}).get(key)
+
+    if entry is None:
+        return f"Wiki entry '{key}' not found."
+
+    content_file = entry.get("file", "")
+    content = ""
+    if content_file:
+        fp = _wiki_dir() / content_file
+        if fp.exists():
+            content = fp.read_text(encoding="utf-8", errors="replace")
+
+    lines = [
+        f"Key: {key}",
+        f"Category: {entry.get('category', '?')}",
+        f"Updated: {entry.get('updated', '?')}",
+        f"Tags: {', '.join(entry.get('tags', []))}",
+        "",
+        content,
+    ]
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MOD PROJECT TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def get_mod_info() -> str:
+    """Read Celeste mod project metadata from everest.yaml and project files.
+
+    Returns mod name, version, dependencies, and project structure summary.
+    """
+    lines = [f"Workspace: {WORKSPACE}"]
+
+    # Check for everest.yaml
+    for yaml_name in ("everest.yaml", "everest.yml"):
+        yaml_path = WORKSPACE / yaml_name
+        if yaml_path.exists():
+            lines.append(f"\n--- {yaml_name} ---")
+            content = yaml_path.read_text(encoding="utf-8", errors="replace")
+            lines.append(content[:3000])
+            break
+    else:
+        lines.append("\nNo everest.yaml found (not an Everest mod root, or "
+                      "LOENN_MCP_WORKSPACE may need adjustment).")
+
+    # Check for Loenn plugin files
+    loenn_dir = WORKSPACE / "Loenn"
+    if loenn_dir.exists():
+        ent_count = len(list((loenn_dir / "entities").glob("*.lua"))) if (loenn_dir / "entities").exists() else 0
+        trig_count = len(list((loenn_dir / "triggers").glob("*.lua"))) if (loenn_dir / "triggers").exists() else 0
+        fx_count = len(list((loenn_dir / "effects").glob("*.lua"))) if (loenn_dir / "effects").exists() else 0
+        lines.append(f"\nLoenn plugins: {ent_count} entities, {trig_count} triggers, {fx_count} effects")
+
+    # Count maps
+    maps_dir = WORKSPACE / "Maps"
+    if maps_dir.exists():
+        bins = list(maps_dir.rglob("*.bin"))
+        lines.append(f"Maps: {len(bins)} .bin files")
+
+    # Check for Dialog
+    dialog_dir = WORKSPACE / "Dialog"
+    if dialog_dir.exists():
+        dialog_files = list(dialog_dir.glob("*.txt"))
+        lines.append(f"Dialog: {len(dialog_files)} language file(s)")
+
+    # Check for Graphics
+    gfx_dir = WORKSPACE / "Graphics"
+    if gfx_dir.exists():
+        png_count = len(list(gfx_dir.rglob("*.png")))
+        lines.append(f"Graphics: {png_count} PNG file(s)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def validate_map(map_path: str) -> str:
+    """Validate an entire map — run playability checks on every room.
+
+    Extension of validate_room that processes all rooms at once and
+    returns a summary report.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    if not rooms:
+        return "No rooms in this map."
+
+    total_warnings = 0
+    pass_count = 0
+    fail_rooms: list[tuple[str, list[str]]] = []
+
+    for room in rooms:
+        warnings = pcg.validate_room_structure(room)
+        rname = room.get("name", "?")
+        if warnings:
+            total_warnings += len(warnings)
+            fail_rooms.append((rname, warnings))
+        else:
+            pass_count += 1
+
+    lines = [
+        f"Map Validation: {data.get('_package', '?')}",
+        f"Rooms: {len(rooms)} total, {pass_count} passed, "
+        f"{len(fail_rooms)} with issues",
+        f"Total warnings: {total_warnings}",
+    ]
+
+    if fail_rooms:
+        lines.append("")
+        for rname, warnings in fail_rooms:
+            lines.append(f"  {rname.replace('lvl_', '')}:")
+            for w in warnings:
+                lines.append(f"    - {w}")
+
+    if not fail_rooms:
+        lines.append("\nAll rooms passed validation.")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_trigger_definition(trigger_file: str) -> str:
+    """Read a Loenn trigger Lua definition and extract its properties.
+
+    Args:
+        trigger_file: Filename (e.g. "starterFlag" or "starterFlag.lua")
+    """
+    if not trigger_file.endswith(".lua"):
+        trigger_file += ".lua"
+
+    trig_dir = (WORKSPACE / "Loenn" / "triggers").resolve()
+    path = (trig_dir / trigger_file).resolve()
+    try:
+        path.relative_to(trig_dir)
+    except ValueError:
+        return "Invalid trigger file path."
+    if not path.exists():
+        return f"Trigger file not found: {trigger_file}"
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+
+    names = re.findall(r"\.name\s*=\s*[\"']([^\"']+)", text)
+    data_blocks = re.findall(r"data\s*=\s*\{([^}]+)\}", text)
+
+    lines = [f"=== {trigger_file} ==="]
+    if names:
+        lines.append(f"Names: {', '.join(names)}")
+    if data_blocks:
+        lines.append("\nDefault properties:")
+        for block in data_blocks[:3]:
+            for prop in re.findall(r"(\w+)\s*=\s*([^,\n]+)", block):
+                lines.append(f"  {prop[0]} = {prop[1].strip()}")
+
+    lines.append(f"\n--- Source ({len(text)} chars) ---")
+    if len(text) > 4000:
+        lines.append(text[:4000] + "\n... (truncated)")
+    else:
+        lines.append(text)
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_effect_definition(effect_file: str) -> str:
+    """Read a Loenn effect Lua definition and extract its properties.
+
+    Args:
+        effect_file: Filename (e.g. "voidBg" or "voidBg.lua")
+    """
+    if not effect_file.endswith(".lua"):
+        effect_file += ".lua"
+
+    fx_dir = (WORKSPACE / "Loenn" / "effects").resolve()
+    path = (fx_dir / effect_file).resolve()
+    try:
+        path.relative_to(fx_dir)
+    except ValueError:
+        return "Invalid effect file path."
+    if not path.exists():
+        return f"Effect file not found: {effect_file}"
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+
+    names = re.findall(r"\.name\s*=\s*[\"']([^\"']+)", text)
+
+    lines = [f"=== {effect_file} ==="]
+    if names:
+        lines.append(f"Names: {', '.join(names)}")
+
+    lines.append(f"\n--- Source ({len(text)} chars) ---")
+    if len(text) > 4000:
+        lines.append(text[:4000] + "\n... (truncated)")
+    else:
+        lines.append(text)
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def export_room_json(
+    map_path: str,
+    room_name: str,
+    output_path: str = "",
+) -> str:
+    """Export a room's data as a JSON file for inspection or reuse.
+
+    Useful for debugging, sharing room designs, or feeding room data
+    into external tools.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        output_path: Output JSON path (default: auto-generated in workspace)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    if not output_path:
+        safe_name = re.sub(r"[^\w\-]", "_", room.get("name", room_name))
+        output_path = f"exports/{safe_name}.json"
+
+    out = _resolve(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    out.write_text(
+        json.dumps(room, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return f"Exported room '{room.get('name')}' to {output_path}"
+
+
+@mcp.tool()
+def import_room_json(
+    map_path: str,
+    json_path: str,
+    new_room_name: str = "",
+    x: int = 0,
+    y: int = 0,
+) -> str:
+    """Import a room from a previously exported JSON file into a map.
+
+    Args:
+        map_path: Path to the .bin file to import into
+        json_path: Path to the JSON room file
+        new_room_name: Override room name (optional)
+        x: Override X position
+        y: Override Y position
+    """
+    map_file = _resolve(map_path)
+    if not map_file.exists():
+        return f"Map not found: {map_path}"
+
+    json_file = _resolve(json_path)
+    if not json_file.exists():
+        return f"JSON file not found: {json_path}"
+
+    try:
+        room = json.loads(json_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return "Invalid JSON file."
+
+    if not isinstance(room, dict) or room.get("__name") != "level":
+        return "JSON does not contain a valid Celeste room element."
+
+    data = cb.read_map(map_file)
+    levels = cb.find_child(data, "levels")
+    if levels is None:
+        return "Invalid map."
+
+    if new_room_name:
+        name = new_room_name if new_room_name.startswith("lvl_") else f"lvl_{new_room_name}"
+        room["name"] = name
+    if x != 0:
+        room["x"] = x
+    if y != 0:
+        room["y"] = y
+
+    # Check duplicate
+    for r in cb.get_rooms(data):
+        if r.get("name") == room.get("name"):
+            return f"Room '{room['name']}' already exists in the map."
+
+    levels["__children"].append(room)
+    cb.write_map(map_file, data)
+
+    return f"Imported room '{room.get('name')}' into {map_path}."
+
+
+@mcp.tool()
+def summarize_map_diff(
+    map_path: str,
+    snapshot_key: str = "",
+) -> str:
+    """Take or compare map snapshots for architecture-level diffing.
+
+    Inspired by gdep's summarize_project_diff. On first call with a key,
+    saves a snapshot of the map's structure. On a later call with the same
+    key, compares the current state to the snapshot and reports what changed.
+
+    Args:
+        map_path: Path to the .bin file
+        snapshot_key: Unique key for this snapshot pair. If empty, uses
+            the map filename.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    if not snapshot_key:
+        snapshot_key = path.stem
+
+    # Build current snapshot
+    current: dict = {
+        "package": data.get("_package", "?"),
+        "rooms": {},
+        "total_entities": 0,
+        "total_triggers": 0,
+    }
+    for room in rooms:
+        rname = room.get("name", "?")
+        ent_el = cb.find_child(room, "entities")
+        trig_el = cb.find_child(room, "triggers")
+        ent_n = len(ent_el.get("__children", [])) if ent_el else 0
+        trig_n = len(trig_el.get("__children", [])) if trig_el else 0
+        current["rooms"][rname] = {
+            "width": room.get("width", 0),
+            "height": room.get("height", 0),
+            "entities": ent_n,
+            "triggers": trig_n,
+        }
+        current["total_entities"] += ent_n
+        current["total_triggers"] += trig_n
+
+    snapshot_dir = _wiki_dir()
+    snap_file = snapshot_dir / f"snapshot_{re.sub(r'[^w-]', '_', snapshot_key)}.json"
+
+    if not snap_file.exists():
+        snap_file.write_text(json.dumps(current, indent=2), encoding="utf-8")
+        return (
+            f"Snapshot saved as '{snapshot_key}' ({len(rooms)} rooms, "
+            f"{current['total_entities']} entities, "
+            f"{current['total_triggers']} triggers). "
+            f"Call again with the same key to diff."
+        )
+
+    # Compare
+    try:
+        previous = json.loads(snap_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return "Could not read previous snapshot."
+
+    prev_rooms = set(previous.get("rooms", {}).keys())
+    curr_rooms = set(current["rooms"].keys())
+
+    added = curr_rooms - prev_rooms
+    removed = prev_rooms - curr_rooms
+    shared = curr_rooms & prev_rooms
+
+    lines = [
+        f"Map diff for '{snapshot_key}':",
+        f"  Rooms: {len(prev_rooms)} -> {len(curr_rooms)} "
+        f"(+{len(added)} -{len(removed)})",
+        f"  Entities: {previous.get('total_entities', 0)} -> "
+        f"{current['total_entities']}",
+        f"  Triggers: {previous.get('total_triggers', 0)} -> "
+        f"{current['total_triggers']}",
+    ]
+
+    if added:
+        lines.append(f"\n  Added rooms: {', '.join(r.replace('lvl_', '') for r in sorted(added))}")
+    if removed:
+        lines.append(f"  Removed rooms: {', '.join(r.replace('lvl_', '') for r in sorted(removed))}")
+
+    changed: list[str] = []
+    for rname in sorted(shared):
+        p = previous["rooms"][rname]
+        c = current["rooms"][rname]
+        diffs = []
+        if p["entities"] != c["entities"]:
+            diffs.append(f"entities {p['entities']}->{c['entities']}")
+        if p["triggers"] != c["triggers"]:
+            diffs.append(f"triggers {p['triggers']}->{c['triggers']}")
+        if p["width"] != c["width"] or p["height"] != c["height"]:
+            diffs.append(f"size {p['width']}x{p['height']}->{c['width']}x{c['height']}")
+        if diffs:
+            changed.append(f"    {rname.replace('lvl_', '')}: {', '.join(diffs)}")
+
+    if changed:
+        lines.append(f"\n  Modified rooms ({len(changed)}):")
+        lines.extend(changed)
+
+    # Update snapshot
+    snap_file.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    lines.append("\n(Snapshot updated to current state)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def batch_validate_and_fix(
+    map_path: str,
+    auto_fix: bool = False,
+) -> str:
+    """Validate all rooms and optionally auto-fix common issues.
+
+    Checks every room for missing player spawn, missing floor, entities
+    out of bounds, etc. With auto_fix=True, applies safe fixes like
+    adding a player spawn to rooms that lack one.
+
+    Args:
+        map_path: Path to the .bin file
+        auto_fix: If True, applies automatic fixes for safe issues
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+
+    if not rooms:
+        return "No rooms in this map."
+
+    total_issues = 0
+    total_fixed = 0
+    report: list[str] = []
+
+    for room in rooms:
+        warnings = pcg.validate_room_structure(room)
+        rname = room.get("name", "?")
+
+        if not warnings:
+            continue
+
+        total_issues += len(warnings)
+        room_fixes: list[str] = []
+
+        if auto_fix:
+            # Fix: add player spawn if missing
+            if any("player" in w.lower() or "spawn" in w.lower() for w in warnings):
+                ent_el = cb.find_child(room, "entities")
+                if ent_el is None:
+                    ent_el = {"__name": "entities", "__children": []}
+                    room["__children"].append(ent_el)
+                has_player = any(
+                    e.get("__name") == "player"
+                    for e in ent_el.get("__children", [])
+                )
+                if not has_player:
+                    ent_el["__children"].append({
+                        "__name": "player",
+                        "__children": [],
+                        "id": _next_entity_id(room),
+                        "x": 32,
+                        "y": room.get("height", 184) - 32,
+                    })
+                    room_fixes.append("Added player spawn")
+                    total_fixed += 1
+
+        report.append(f"  {rname.replace('lvl_', '')}: {len(warnings)} issue(s)")
+        for w in warnings:
+            report.append(f"    - {w}")
+        for f in room_fixes:
+            report.append(f"    + FIXED: {f}")
+
+    if auto_fix and total_fixed > 0:
+        cb.write_map(path, data)
+
+    lines = [
+        f"Batch Validation: {data.get('_package', '?')}",
+        f"Rooms checked: {len(rooms)}",
+        f"Issues found: {total_issues}",
+    ]
+    if auto_fix:
+        lines.append(f"Auto-fixes applied: {total_fixed}")
+
+    if report:
+        lines.append("")
+        lines.extend(report)
+    else:
+        lines.append("All rooms passed validation.")
+
+    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
