@@ -12,7 +12,7 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 
 ## Features
 
-### 22 MCP tools across 6 categories
+### 28 MCP tools across 7 categories
 
 **Map Reading**
 | Tool | Description |
@@ -27,10 +27,20 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 |---|---|
 | `add_entity` | Place an entity in a room (auto-assigns ID) |
 | `remove_entity` | Delete an entity by ID |
+| `add_trigger` | Place a trigger (rectangular region) in a room, with optional path nodes |
+| `remove_trigger` | Delete a trigger by ID |
 | `set_room_tiles` | Replace the tile grid for a room |
 | `add_room` | Create a new room with custom position/size |
 | `remove_room` | Delete a room from the map |
 | `create_map` | Create a new empty `.bin` map file |
+
+**Stylegrounds**
+| Tool | Description |
+|---|---|
+| `list_stylegrounds` | List foreground + background effects (with indices) |
+| `add_styleground` | Add an effect (parallax, custom Lua effect, `apply` group, etc.) to FG or BG |
+| `remove_styleground` | Remove an effect by index |
+| `update_styleground` | Merge property changes into an existing effect |
 
 **Entity / Trigger Catalog**
 | Tool | Description |

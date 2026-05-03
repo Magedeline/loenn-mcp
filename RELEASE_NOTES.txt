@@ -1,3 +1,38 @@
+loenn-mcp v2.1.0
+================
+
+Closes the styleground / trigger gap reported by users — previously you could
+add entities and rooms via MCP, but stylegrounds and triggers required opening
+Lönn manually. Now everything is reachable from the agent.
+
+
+WHAT'S NEW IN v2.1
+------------------
+
+6 new MCP tools (28 tools total):
+
+  Triggers (room-level, mirror add_entity / remove_entity):
+    add_trigger             — place a trigger in a room with width/height
+                              and optional path nodes; auto-assigns a unique
+                              ID across both entities and triggers.
+    remove_trigger          — delete a trigger by ID.
+
+  Stylegrounds (map-level, under Style/Foregrounds and Style/Backgrounds):
+    list_stylegrounds       — numbered listing of FG + BG effects (and the
+                              children of any `apply` groups).
+    add_styleground         — add a parallax, custom Lua effect (e.g.
+                              2.5DHelper/VoidBg), or an `apply` group to FG
+                              or BG. Auto-creates Style/Foregrounds/
+                              Backgrounds if missing.
+    remove_styleground      — remove an effect by index.
+    update_styleground      — merge property changes into an existing effect
+                              (set keys, or pass null to clear them).
+
+No new runtime dependencies.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 loenn-mcp v2.0.0
 ================
 

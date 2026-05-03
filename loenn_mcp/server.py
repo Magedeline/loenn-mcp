@@ -6,8 +6,10 @@ files (.bin) directly from VS Code via the Model Context Protocol.
 
 Tools:
   Map Reading:    list_maps, read_map_overview, read_room, get_room_tiles
-  Map Editing:    add_entity, remove_entity, set_room_tiles, add_room,
-                  remove_room, create_map
+  Map Editing:    add_entity, remove_entity, add_trigger, remove_trigger,
+                  set_room_tiles, add_room, remove_room, create_map
+  Stylegrounds:   list_stylegrounds, add_styleground, remove_styleground,
+                  update_styleground
   Entity Catalog: list_entity_definitions, get_entity_definition,
                   list_trigger_definitions
   Analysis:       analyze_map, visualize_map_layout
@@ -385,6 +387,134 @@ def remove_entity(map_path: str, room_name: str, entity_id: int) -> str:
 
 
 @mcp.tool()
+def add_trigger(
+    map_path: str,
+    room_name: str,
+    trigger_name: str,
+    x: int,
+    y: int,
+    width: int = 16,
+    height: int = 16,
+    trigger_id: int = -1,
+    properties: str = "{}",
+    nodes: str = "[]",
+) -> str:
+    """Add a trigger to a room and save the map.
+
+    Triggers are rectangular regions that fire effects when the player enters
+    them (dialog, camera moves, music changes, flag toggles, etc.). Trigger
+    IDs are auto-assigned to be unique across both entities and triggers in
+    the room.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        trigger_name: Trigger type (e.g. "everest/dialogTrigger",
+            "2.5DHelper/StarterFlagTrigger")
+        x: X position in pixels
+        y: Y position in pixels
+        width: Trigger width in pixels (default 16)
+        height: Trigger height in pixels (default 16)
+        trigger_id: Trigger ID (-1 to auto-assign)
+        properties: JSON object string of extra properties
+            (e.g. '{"dialog_id": "MAP_INTRO"}')
+        nodes: JSON array of {"x": int, "y": int} objects for triggers that
+            need path/target nodes (e.g. cameraTargetTrigger). Default "[]".
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    trig_el = cb.find_child(room, "triggers")
+    if trig_el is None:
+        trig_el = {"__name": "triggers", "__children": []}
+        room["__children"].append(trig_el)
+
+    if trigger_id < 0:
+        trigger_id = _next_entity_id(room)
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON properties: {properties}"
+    if not isinstance(props, dict):
+        return "properties must be a JSON object."
+
+    try:
+        node_list = json.loads(nodes)
+    except json.JSONDecodeError:
+        return f"Invalid JSON nodes: {nodes}"
+    if not isinstance(node_list, list):
+        return "nodes must be a JSON array of {x, y} objects."
+
+    node_children: list[dict] = []
+    for i, n in enumerate(node_list):
+        if not isinstance(n, dict) or "x" not in n or "y" not in n:
+            return f"Invalid node at index {i}: expected {{'x': int, 'y': int}}."
+        node_children.append({
+            "__name": "node",
+            "__children": [],
+            "x": int(n["x"]),
+            "y": int(n["y"]),
+        })
+
+    trigger: dict = {
+        "__name": trigger_name,
+        "__children": node_children,
+        "id": trigger_id,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+    }
+    _protected = frozenset(("__name", "__children", "id", "x", "y", "width", "height"))
+    trigger.update({k: v for k, v in props.items() if k not in _protected})
+
+    trig_el["__children"].append(trigger)
+    cb.write_map(path, data)
+
+    suffix = f" with {len(node_children)} node(s)" if node_children else ""
+    return (
+        f"Added trigger '{trigger_name}' (id={trigger_id}) at "
+        f"({x},{y}) {width}x{height} to room '{room_name}'{suffix}."
+    )
+
+
+@mcp.tool()
+def remove_trigger(map_path: str, room_name: str, trigger_id: int) -> str:
+    """Remove a trigger from a room by its ID.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        trigger_id: Trigger ID to remove
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    trig_el = cb.find_child(room, "triggers")
+    if trig_el is None:
+        return "No triggers in this room."
+
+    children = trig_el.get("__children", [])
+    before = len(children)
+    trig_el["__children"] = [t for t in children if t.get("id") != trigger_id]
+
+    if len(trig_el["__children"]) == before:
+        return f"Trigger id={trigger_id} not found."
+
+    cb.write_map(path, data)
+    return f"Removed trigger id={trigger_id} from '{room_name}'."
+
+
+@mcp.tool()
 def set_room_tiles(
     map_path: str,
     room_name: str,
@@ -576,6 +706,252 @@ def create_map(map_path: str, package_name: str = "") -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     cb.write_map(path, data)
     return f"Created empty map: {map_path} (package: {package_name})"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STYLEGROUND TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Attributes shown inline next to a styleground in list_stylegrounds output.
+_STYLE_PREVIEW_KEYS = (
+    "texture", "only", "exclude", "flag", "notflag", "tag",
+    "scrollx", "scrolly", "speedx", "speedy", "color", "alpha",
+)
+
+
+def _style_layer_element(map_data: dict, layer: str, create: bool = False) -> dict | None:
+    """Return Style/Foregrounds or Style/Backgrounds, optionally creating it."""
+    layer_norm = layer.lower()
+    if layer_norm in ("fg", "foreground", "foregrounds"):
+        layer_name = "Foregrounds"
+    elif layer_norm in ("bg", "background", "backgrounds"):
+        layer_name = "Backgrounds"
+    else:
+        return None
+
+    style = cb.find_child(map_data, "Style")
+    if style is None:
+        if not create:
+            return None
+        style = {"__name": "Style", "__children": [
+            {"__name": "Foregrounds", "__children": []},
+            {"__name": "Backgrounds", "__children": []},
+        ]}
+        map_data["__children"].append(style)
+
+    el = cb.find_child(style, layer_name)
+    if el is None and create:
+        el = {"__name": layer_name, "__children": []}
+        style["__children"].append(el)
+    return el
+
+
+def _styleground_summary(el: dict) -> str:
+    """One-line preview of a styleground element (effect name + key props)."""
+    name = el.get("__name", "?")
+    parts = [name]
+    for k in _STYLE_PREVIEW_KEYS:
+        if k in el:
+            parts.append(f"{k}={el[k]}")
+    return " ".join(parts)
+
+
+@mcp.tool()
+def list_stylegrounds(map_path: str) -> str:
+    """List all stylegrounds (foreground + background effects) in a map.
+
+    Stylegrounds live under Style/Foregrounds and Style/Backgrounds. Each
+    entry is shown with its top-level index (used by remove_styleground /
+    update_styleground), the effect type, and a few key attributes. Children
+    of `apply` group elements are listed indented underneath their group.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+
+    lines = [f"Map: {data.get('_package', '?')}"]
+    for layer_name in ("Foregrounds", "Backgrounds"):
+        layer_el = _style_layer_element(data, layer_name)
+        children = layer_el.get("__children", []) if layer_el else []
+        lines.append("")
+        lines.append(f"{layer_name} ({len(children)}):")
+        if not children:
+            lines.append("  (none)")
+            continue
+        for i, sg in enumerate(children):
+            lines.append(f"  [{i}] {_styleground_summary(sg)}")
+            # apply groups can wrap nested stylegrounds
+            for nested in sg.get("__children", []):
+                lines.append(f"        \u21b3 {_styleground_summary(nested)}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_styleground(
+    map_path: str,
+    effect_name: str,
+    layer: str = "bg",
+    properties: str = "{}",
+    index: int = -1,
+) -> str:
+    """Add a styleground effect to a map.
+
+    Stylegrounds are layered visual effects (parallax backgrounds, custom
+    Lua effects like 2.5DHelper/VoidBg, snow/dust overlays, etc.) rendered
+    behind or in front of every room. They live under Style/Foregrounds or
+    Style/Backgrounds — auto-created if missing.
+
+    Args:
+        map_path: Path to the .bin file
+        effect_name: Effect type (e.g. "parallax", "2.5DHelper/VoidBg",
+            "WhiteholeBg", "apply" for a group element)
+        layer: "bg" / "background" / "backgrounds" (default), or "fg" /
+            "foreground" / "foregrounds"
+        properties: JSON object of effect properties
+            (e.g. '{"texture": "bgs/01/bg", "only": "lvl_a-01"}')
+        index: Position to insert at (-1 appends to the end)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    layer_el = _style_layer_element(data, layer, create=True)
+    if layer_el is None:
+        return (
+            f"Invalid layer: '{layer}'. Use 'fg'/'foregrounds' or "
+            f"'bg'/'backgrounds'."
+        )
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON properties: {properties}"
+    if not isinstance(props, dict):
+        return "properties must be a JSON object."
+
+    sg: dict = {"__name": effect_name, "__children": []}
+    _protected = frozenset(("__name", "__children"))
+    sg.update({k: v for k, v in props.items() if k not in _protected})
+
+    children = layer_el["__children"]
+    if index < 0 or index >= len(children):
+        children.append(sg)
+        pos = len(children) - 1
+    else:
+        children.insert(index, sg)
+        pos = index
+
+    cb.write_map(path, data)
+
+    layer_label = layer_el.get("__name", layer)
+    return (
+        f"Added styleground '{effect_name}' to {layer_label} at index {pos}."
+    )
+
+
+@mcp.tool()
+def remove_styleground(map_path: str, layer: str, index: int) -> str:
+    """Remove a styleground from a map by its index in the layer.
+
+    Use list_stylegrounds first to see the current indices.
+
+    Args:
+        map_path: Path to the .bin file
+        layer: "fg"/"foregrounds" or "bg"/"backgrounds"
+        index: 0-based index of the styleground in that layer
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    layer_el = _style_layer_element(data, layer)
+    if layer_el is None:
+        return f"No '{layer}' stylegrounds in this map."
+
+    children = layer_el.get("__children", [])
+    if not (0 <= index < len(children)):
+        return (
+            f"Index {index} out of range "
+            f"(layer has {len(children)} stylegrounds)."
+        )
+
+    removed = children.pop(index)
+    cb.write_map(path, data)
+    return (
+        f"Removed styleground '{removed.get('__name', '?')}' "
+        f"at index {index} from {layer_el.get('__name', layer)}."
+    )
+
+
+@mcp.tool()
+def update_styleground(
+    map_path: str,
+    layer: str,
+    index: int,
+    properties: str,
+) -> str:
+    """Merge properties into an existing styleground without replacing it.
+
+    Existing keys in `properties` overwrite the styleground's values; keys
+    not present in `properties` are left unchanged. To clear a key, pass
+    its value as null.
+
+    Args:
+        map_path: Path to the .bin file
+        layer: "fg"/"foregrounds" or "bg"/"backgrounds"
+        index: 0-based index of the styleground in that layer
+        properties: JSON object of properties to merge in
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    layer_el = _style_layer_element(data, layer)
+    if layer_el is None:
+        return f"No '{layer}' stylegrounds in this map."
+
+    children = layer_el.get("__children", [])
+    if not (0 <= index < len(children)):
+        return (
+            f"Index {index} out of range "
+            f"(layer has {len(children)} stylegrounds)."
+        )
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON properties: {properties}"
+    if not isinstance(props, dict):
+        return "properties must be a JSON object."
+
+    sg = children[index]
+    _protected = frozenset(("__name", "__children"))
+    cleared: list[str] = []
+    updated: list[str] = []
+    for k, v in props.items():
+        if k in _protected:
+            continue
+        if v is None:
+            if k in sg:
+                del sg[k]
+                cleared.append(k)
+        else:
+            sg[k] = v
+            updated.append(k)
+
+    cb.write_map(path, data)
+
+    parts = []
+    if updated:
+        parts.append(f"set {', '.join(updated)}")
+    if cleared:
+        parts.append(f"cleared {', '.join(cleared)}")
+    summary = "; ".join(parts) if parts else "no changes"
+    return (
+        f"Updated styleground '{sg.get('__name', '?')}' "
+        f"at {layer_el.get('__name', layer)}[{index}]: {summary}."
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
