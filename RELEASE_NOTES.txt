@@ -1,3 +1,21 @@
+loenn-mcp v3.0.1
+================
+
+Patch release: drop unused pygame + pytmx dependencies.
+
+These were added by an earlier PR but never imported anywhere in the
+package. They blocked installation on Pythons that don't have prebuilt
+pygame wheels (e.g. Windows + Python 3.14), where pip would fall back to
+building pygame from source and fail with:
+
+    ModuleNotFoundError: No module named
+    'setuptools._distutils.msvccompiler'
+
+After this release, `pip install loenn-mcp` only pulls in `fastmcp`.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 loenn-mcp v3.0.0
 ================
 
