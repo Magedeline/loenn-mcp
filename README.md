@@ -12,7 +12,7 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 
 ## Features
 
-### 28 MCP tools across 7 categories
+### 31 MCP tools across 8 categories
 
 **Map Reading**
 | Tool | Description |
@@ -62,13 +62,20 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 |---|---|
 | `render_map_html` | Interactive HTML preview (zoom, pan, room details, minimap, search) |
 
-**Procedural Generation (NEW in v2)**
+**Procedural Generation**
 | Tool | Description |
 |---|---|
 | `build_pattern_library` | Scan local `.bin` maps and extract room patterns into a reusable JSON library |
 | `generate_room_from_pattern` | Generate a new room using patterns + a strategy + seed |
 | `validate_room` | Check a room for playability issues (spawn, floor, bounds) |
 | `ingest_external_map` | Download maps from external URLs (GameBanana etc.) and extract patterns |
+
+**Image-to-Map & Terrain Generation (NEW in v4)**
+| Tool | Description |
+|---|---|
+| `generate_map_from_image` | Convert a color-mapped image (PNG/JPG/BMP) into a full playable Celeste map |
+| `generate_terrain_map` | Procedural map using seeded Perlin noise + Voronoi biomes |
+| `preview_terrain_biomes` | ASCII preview of biome layout before generating |
 
 ---
 
@@ -250,6 +257,114 @@ Downloaded files are saved to `PCG/Datasets/` with an `attribution.json` file.
 
 ---
 
+## Image-to-Map Conversion (NEW in v4)
+
+Convert any color-mapped image directly into a playable Celeste map. Each pixel becomes one 8×8 tile, with colors mapped to tile types and entities.
+
+### Default color mapping
+
+| Color | Hex | Maps to |
+|---|---|---|
+| Black | `#000000` | Solid tile (foreground) |
+| White | `#FFFFFF` | Air (empty space) |
+| Red | `#FF0000` | Spike hazard |
+| Green | `#00FF00` | Player spawn |
+| Blue | `#0000FF` | Jump-through platform |
+| Yellow | `#FFFF00` | Strawberry collectible |
+| Magenta | `#FF00FF` | Spring (bounce pad) |
+| Cyan | `#00FFFF` | Refill crystal |
+| Orange | `#FF8000` | Crumble block |
+| Grey | `#808080` | Background solid (decorative) |
+
+### Usage
+
+```python
+# Basic — converts image using default color mapping
+generate_map_from_image(image_path="Assets/my_level.png")
+
+# Custom colors and scale
+generate_map_from_image(
+    image_path="Assets/large_map.png",
+    output_path="Maps/Custom/level.bin",
+    scale=4,  # 4×4 pixel blocks → 1 tile
+    color_map_json='{"#FF0000":"solid","#00FF00":"spawn","#0000FF":"air"}'
+)
+```
+
+### How it works
+
+1. The image is loaded and optionally downscaled by `scale` factor
+2. Each pixel is matched to the closest color in the color map (within tolerance)
+3. The grid is split into room-sized chunks (default 40×23 tiles = 320×184 px)
+4. Each chunk becomes a room with proper tiles, entities, and a player spawn
+5. The complete map is written as a `.bin` file
+
+Requires `Pillow` — install with: `pip install loenn-mcp[image]`
+
+---
+
+## Seeded Terrain Generation (NEW in v4)
+
+Generate complete maps procedurally using Perlin noise and Voronoi diagrams, inspired by [AliShazly/map-generator](https://github.com/AliShazly/map-generator).
+
+### Biomes
+
+| Biome | Character | Terrain |
+|---|---|---|
+| `mountain` | Dense tiles | Tight platforms, spikes |
+| `forest` | Moderate density | Many platforms, springs |
+| `plains` | Open spaces | Gentle platforms, collectibles |
+| `lake` | Sparse tiles | Jump-throughs, refills |
+| `cave` | Enclosed | Crumble blocks, dark rooms |
+| `summit` | Sparse platforms | Wind effects |
+
+### Usage
+
+```python
+# Generate with specific seed (reproducible)
+generate_terrain_map(seed=42, difficulty=3)
+
+# Customize grid size and biomes
+generate_terrain_map(
+    seed=1234,
+    width_rooms=5,
+    height_rooms=4,
+    biome_set="mountain,cave,summit",
+    difficulty=4,
+    frequency=12.0,
+    voronoi_points=16
+)
+
+# Preview biome layout first (no file created)
+preview_terrain_biomes(seed=42, width_rooms=4, height_rooms=3)
+# Output:
+# [P] [^] [^] [F]
+# [~] [P] [^] [M]
+# [C] [~] [P] [F]
+```
+
+### Generation algorithm
+
+1. **Perlin noise** creates organic heightmap terrain — controls where solid tiles, platforms, and gaps appear
+2. **Voronoi diagrams** partition the map into biome regions — each room inherits the biome of its Voronoi region
+3. **Seeded RNG** ensures the same `seed` + parameters always produce the exact same output
+4. **Difficulty scaling** (1-5) adjusts hazard density, tile coverage, and platform frequency
+5. Biome properties control tile characters, entity types, room flags (dark, underwater, wind)
+
+### Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `seed` | -1 (random) | Integer seed for reproducible output |
+| `width_rooms` | 4 | Rooms horizontally |
+| `height_rooms` | 3 | Rooms vertically |
+| `frequency` | 8.0 | Perlin noise frequency (lower = smoother) |
+| `voronoi_points` | 12 | Number of biome region centres |
+| `biome_set` | all | Comma-separated biome names |
+| `difficulty` | 3 | 1-5 scale for hazard density |
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -270,13 +385,33 @@ A pure-Python implementation of the Celeste `.bin` map format (no Everest or Lö
 
 ### `pcg.py` — procedural generation module
 
-New in v2. Provides:
+Provides:
 
 - **Pattern extraction** — converts `.bin` rooms into reusable pattern records (size class, entity density, tile motifs, trigger usage, gameplay tags)
 - **Pattern library** — JSON-based store with deduplication by content hash
 - **Strategy-based generation** — `balanced`, `exploration`, `challenge`, `speedrun` modes
 - **Seeded randomness** — `random.Random(seed)` for reproducible outputs; seed exposed via MCP tool parameters
 - **Model profiles** — `deterministic` / `creative` / `architect` profiles control how seeds are resolved
+
+### `image_map.py` — image-to-map conversion (NEW in v4)
+
+Converts color-mapped images into playable Celeste maps:
+
+- **Color-to-role mapping** — configurable palette mapping colors to tiles and entities
+- **Automatic room splitting** — large images are divided into room-sized chunks
+- **Entity placement** — spawns, hazards, collectibles extracted directly from pixel colors
+- **Scale support** — large images can be downscaled (N×N pixel blocks → 1 tile)
+- **Tolerance matching** — fuzzy color matching for hand-drawn or anti-aliased images
+
+### `terrain_gen.py` — seeded terrain generator (NEW in v4)
+
+Procedural map generation inspired by [AliShazly/map-generator](https://github.com/AliShazly/map-generator):
+
+- **Perlin noise** — pure-Python implementation with fractal octaves for organic terrain
+- **Voronoi biomes** — map partitioned into distinct biome regions (mountain, forest, plains, lake, cave, summit)
+- **Fully seeded** — same seed + parameters = identical output every time
+- **Difficulty scaling** — 1-5 scale controls hazard density, tile coverage, and platform frequency
+- **Biome-aware entities** — each biome has appropriate hazards, collectibles, and room flags
 
 ### `server.py` — MCP server
 
@@ -288,6 +423,9 @@ Built with [FastMCP](https://github.com/jlowin/fastmcp). All file paths are reso
 
 - Python 3.9+
 - `fastmcp >= 3.0.0`
+- `Pillow >= 9.0` (optional — only needed for `generate_map_from_image`)
+
+Install with image support: `pip install loenn-mcp[image]`
 
 No Celeste installation required to parse, generate, or preview maps.
 
