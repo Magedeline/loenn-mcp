@@ -1,25 +1,30 @@
 """
 Lönn MCP Server — Celeste Map Editor for AI Agents
 
-Provides 60 tools for reading, editing, analyzing, and generating Celeste map
+Provides tools for reading, editing, analyzing, and generating Celeste map
 files (.bin) directly from VS Code via the Model Context Protocol.
 
-Tools (60 across 18 categories):
+Tools (categories):
   Map Reading:      list_maps, read_map_overview, read_room, get_room_tiles
   Map Reading Ext:  read_map_metadata, search_entities, search_triggers, compare_rooms
   Map Editing:      add_entity, remove_entity, add_trigger, remove_trigger,
                     set_room_tiles, add_room, remove_room, create_map
   Map Editing Ext:  update_entity, move_entity, update_room, clone_room,
                     batch_add_entities, resize_room
+  Room Settings:    get_room_settings, update_room_settings,
+                    rename_room, move_room, resize_room
+  Map Metadata:     get_map_metadata, set_map_metadata
+  Dependencies:     get_map_dependencies, set_map_dependencies
   Decals:           list_decals, add_decal, remove_decal
   Stylegrounds:     list_stylegrounds, add_styleground, remove_styleground,
                     update_styleground
   Entity Catalog:   list_entity_definitions, get_entity_definition,
-                    list_trigger_definitions
+                    list_trigger_definitions, list_effect_definitions
   Catalog Ext:      get_trigger_definition, get_effect_definition
   Analysis:         analyze_map, visualize_map_layout
   Advanced Analysis:analyze_entity_usage, analyze_difficulty, find_entity_references,
                     detect_map_patterns, analyze_room_connectivity
+  Asset Analysis:   analyze_map_assets  (ML + Maddie480 graphics dump)
   Suggestions:      suggest_improvements, compare_maps
   Wiki/Cache:       wiki_save, wiki_search, wiki_list, wiki_get
   Mod Project:      get_mod_info, validate_map
@@ -29,10 +34,18 @@ Tools (60 across 18 categories):
                     validate_room, ingest_external_map
   Image/Terrain:    generate_map_from_image, generate_terrain_map,
                     preview_terrain_biomes
+  AI Analysis:      ai_analyze_map, ai_describe_room, ai_suggest_entities (Claude API)
+  Lönn Manager:     install_loenn_manager, get_loenn_manager_source
+
+AI-Powered Tools (requires ANTHROPIC_API_KEY from console.anthropic.com):
+  ai_analyze_map      - Get AI feedback on map design, difficulty, flow
+  ai_describe_room    - Generate narrative descriptions of rooms
+  ai_suggest_entities - Get entity placement recommendations
 
 Usage:
   python server.py                         (uses cwd as workspace)
   LOENN_MCP_WORKSPACE=/path python server.py  (explicit workspace)
+  ANTHROPIC_API_KEY=xxx python server.py   (with AI tools enabled)
 """
 
 import io
@@ -55,12 +68,14 @@ try:
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
+    from . import ai_analyzer                 # installed package
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import pcg                               # run directly from source
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
     import gdep_tools                        # run directly from source
+    import ai_analyzer                       # run directly from source
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -74,7 +89,22 @@ mcp = FastMCP(
         "(balanced/exploration/challenge/speedrun) and optional seed, "
         "validate_room to check basic playability, and "
         "ingest_external_map to import and attribute maps from external URLs "
-        "such as GameBanana mod downloads."
+        "such as GameBanana mod downloads. "
+        "Room settings (music, dark/space/wind/physics) can be read and written "
+        "with get_room_settings / update_room_settings. "
+        "Map-wide metadata (wipe type, intro, color grade) uses "
+        "get_map_metadata / set_map_metadata. "
+        "Mod dependencies are managed with get_map_dependencies / "
+        "set_map_dependencies (writes everest.yaml). "
+        "Use analyze_map_assets for ML-powered asset validation against the "
+        "Maddie480 graphics dump (maddie480.ovh/celeste/graphics-dump-browser) "
+        "and the CelestialCartographers/Loenn entity catalog. "
+        "AI-POWERED TOOLS (requires ANTHROPIC_API_KEY): "
+        "Use ai_analyze_map for Claude-powered design feedback, "
+        "ai_describe_room for narrative room descriptions, and "
+        "ai_suggest_entities for entity placement recommendations. "
+        "Use install_loenn_manager to deploy the Lönn plugin that bridges "
+        "Lönn ↔ MCP for live two-way map editing."
     ),
 )
 
@@ -3349,52 +3379,6 @@ def batch_add_entities(
     return f"Added {added} entities to room '{room_name}'."
 
 
-@mcp.tool()
-def resize_room(
-    map_path: str,
-    room_name: str,
-    width: int = -1,
-    height: int = -1,
-) -> str:
-    """Resize a room (updates width/height; does NOT resize tile grids).
-
-    Note: After resizing you may need to call set_room_tiles to adjust
-    the tile grid to match the new dimensions.
-
-    Args:
-        map_path: Path to the .bin file.
-        room_name: Room to resize.
-        width: New width in pixels (must be multiple of 8, -1 = keep current).
-        height: New height in pixels (must be multiple of 8, -1 = keep current).
-    """
-    path = _resolve(map_path)
-    if not path.exists():
-        return f"File not found: {map_path}"
-
-    data = cb.read_map(path)
-    room = cb.get_room(data, room_name)
-    if room is None:
-        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
-
-    changes = []
-    if width > 0:
-        if width % 8 != 0:
-            return f"Width must be multiple of 8 (got {width})."
-        room["width"] = width
-        changes.append(f"width={width}")
-    if height > 0:
-        if height % 8 != 0:
-            return f"Height must be multiple of 8 (got {height})."
-        room["height"] = height
-        changes.append(f"height={height}")
-
-    if not changes:
-        return "No changes — specify width and/or height."
-
-    cb.write_map(path, data)
-    return f"Resized '{room_name}': {', '.join(changes)}"
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  DECALS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4167,6 +4151,942 @@ def batch_validate_and_fix(map_path: str, auto_fix: bool = False) -> str:
         auto_fix: If True, apply automatic fixes.
     """
     return validate_map(map_path, auto_fix=auto_fix)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ROOM SETTINGS — metadata, music, physics, camera
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_ROOM_BOOL_KEYS = frozenset({
+    "dark", "space", "underwater", "whisper",
+    "disableDownTransition", "delayAltMusicFade",
+    "musicLayer1", "musicLayer2", "musicLayer3", "musicLayer4",
+})
+_ROOM_STR_KEYS = frozenset({
+    "music", "alt_music", "ambience", "windPattern",
+    "musicProgress", "ambienceProgress",
+})
+_ROOM_INT_KEYS = frozenset({
+    "cameraOffsetX", "cameraOffsetY", "c",
+})
+_ROOM_ALL_SETTINGS = _ROOM_BOOL_KEYS | _ROOM_STR_KEYS | _ROOM_INT_KEYS
+
+_WIND_PATTERNS = frozenset({
+    "None", "Left", "Right", "LeftStrong", "RightStrong",
+    "LeftOnOff", "RightOnOff", "LeftOnOffFast", "RightOnOffFast",
+    "Alternating", "LeftGemsOnly", "RightCrazy", "Down", "Up",
+    "Space",
+})
+
+
+@mcp.tool()
+def get_room_settings(map_path: str, room_name: str) -> str:
+    """Get all editable settings for a room (music, physics, wind, camera, flags).
+
+    Returns all metadata properties including music tracks, physics flags
+    (dark/space/underwater), wind pattern, camera offsets, and music layers.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name (with or without 'lvl_' prefix)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    lines = [f"Room settings: {room.get('name', '?')}"]
+    lines.append("")
+    lines.append("── Metadata ─────────────────────────────")
+    lines.append(f"  name            = {room.get('name', '')!r}")
+    lines.append(f"  position        = ({room.get('x', 0)}, {room.get('y', 0)})")
+    lines.append(f"  size            = {room.get('width', 0)}x{room.get('height', 0)}")
+    lines.append(f"  color (c)       = {room.get('c', 0)}")
+    lines.append("")
+    lines.append("── Physics ──────────────────────────────")
+    lines.append(f"  dark            = {room.get('dark', False)}")
+    lines.append(f"  space           = {room.get('space', False)}")
+    lines.append(f"  underwater      = {room.get('underwater', False)}")
+    lines.append(f"  whisper         = {room.get('whisper', False)}")
+    lines.append(f"  windPattern     = {room.get('windPattern', 'None')!r}")
+    lines.append(f"  disableDownTransition = {room.get('disableDownTransition', False)}")
+    lines.append("")
+    lines.append("── Music / Ambience ──────────────────────")
+    lines.append(f"  music           = {room.get('music', '')!r}")
+    lines.append(f"  alt_music       = {room.get('alt_music', '')!r}")
+    lines.append(f"  ambience        = {room.get('ambience', '')!r}")
+    lines.append(f"  musicProgress   = {room.get('musicProgress', '')!r}")
+    lines.append(f"  ambienceProgress= {room.get('ambienceProgress', '')!r}")
+    lines.append(f"  delayAltMusicFade = {room.get('delayAltMusicFade', False)}")
+    lines.append(f"  musicLayer1     = {room.get('musicLayer1', True)}")
+    lines.append(f"  musicLayer2     = {room.get('musicLayer2', True)}")
+    lines.append(f"  musicLayer3     = {room.get('musicLayer3', True)}")
+    lines.append(f"  musicLayer4     = {room.get('musicLayer4', True)}")
+    lines.append("")
+    lines.append("── Camera ────────────────────────────────")
+    lines.append(f"  cameraOffsetX   = {room.get('cameraOffsetX', 0)}")
+    lines.append(f"  cameraOffsetY   = {room.get('cameraOffsetY', 0)}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def update_room_settings(
+    map_path: str,
+    room_name: str,
+    settings: str,
+) -> str:
+    """Update room settings (music, physics, wind, camera, flags) by merging a JSON object.
+
+    Editable keys:
+      Physics:  dark, space, underwater, whisper, disableDownTransition,
+                windPattern (None/Left/Right/LeftStrong/RightStrong/…)
+      Music:    music, alt_music, ambience, musicProgress, ambienceProgress,
+                delayAltMusicFade, musicLayer1..4
+      Camera:   cameraOffsetX, cameraOffsetY
+      Meta:     c (color index 0-7)
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        settings: JSON object of key/value pairs to update,
+                  e.g. '{"music": "event:/music/lvl2/beginning", "dark": true}'
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    try:
+        props = json.loads(settings)
+    except json.JSONDecodeError:
+        return f"Invalid JSON settings: {settings}"
+    if not isinstance(props, dict):
+        return "settings must be a JSON object."
+
+    applied = []
+    rejected = []
+
+    for k, v in props.items():
+        if k not in _ROOM_ALL_SETTINGS:
+            rejected.append(f"{k} (unknown)")
+            continue
+        if k in _ROOM_BOOL_KEYS:
+            if not isinstance(v, bool):
+                rejected.append(f"{k} (must be bool)")
+                continue
+        elif k in _ROOM_INT_KEYS:
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                rejected.append(f"{k} (must be int)")
+                continue
+        elif k == "windPattern":
+            if v not in _WIND_PATTERNS:
+                rejected.append(
+                    f"{k}={v!r} (unknown pattern; "
+                    f"valid: {', '.join(sorted(_WIND_PATTERNS))})"
+                )
+                continue
+        room[k] = v
+        applied.append(f"{k}={v!r}")
+
+    if applied:
+        cb.write_map(path, data)
+
+    lines = [f"Room '{room.get('name')}' settings update:"]
+    if applied:
+        lines.append(f"  Applied: {', '.join(applied)}")
+    if rejected:
+        lines.append(f"  Rejected: {', '.join(rejected)}")
+    if not applied and not rejected:
+        lines.append("  No changes.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def rename_room(map_path: str, room_name: str, new_name: str) -> str:
+    """Rename a room in a map.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Current room name
+        new_name: New room name (lvl_ prefix added automatically if missing)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    canonical = new_name if new_name.startswith("lvl_") else f"lvl_{new_name}"
+    for r in cb.get_rooms(data):
+        if r.get("name") == canonical:
+            return f"A room named '{canonical}' already exists."
+
+    old_name = room.get("name")
+    room["name"] = canonical
+    cb.write_map(path, data)
+    return f"Renamed room '{old_name}' → '{canonical}'."
+
+
+@mcp.tool()
+def move_room(map_path: str, room_name: str, x: int, y: int) -> str:
+    """Move a room to a new world-space position.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        x: New X position in pixels
+        y: New Y position in pixels
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    old_x, old_y = room.get("x", 0), room.get("y", 0)
+    room["x"] = x
+    room["y"] = y
+    cb.write_map(path, data)
+    return f"Moved room '{room.get('name')}' ({old_x},{old_y}) → ({x},{y})."
+
+
+@mcp.tool()
+def resize_room(map_path: str, room_name: str, width: int, height: int) -> str:
+    """Resize a room (snaps to 8-pixel grid, preserves tile data).
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        width: New width in pixels (must be multiple of 8, min 40)
+        height: New height in pixels (must be multiple of 8, min 40)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    width = ((width + 7) // 8) * 8
+    height = ((height + 7) // 8) * 8
+    if width < 40 or height < 40:
+        return "Minimum room size is 40x40 pixels."
+
+    old_w, old_h = room.get("width", 0), room.get("height", 0)
+    room["width"] = width
+    room["height"] = height
+    cb.write_map(path, data)
+    return (
+        f"Resized room '{room.get('name')}': "
+        f"{old_w}x{old_h} → {width}x{height} px."
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MAP METADATA & DEPENDENCY SETTINGS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _get_meta_node(data: dict) -> dict | None:
+    """Return the meta element from map data if present."""
+    return cb.find_child(data, "meta")
+
+
+def _ensure_meta_node(data: dict) -> dict:
+    """Return or create the meta element in map data."""
+    meta = cb.find_child(data, "meta")
+    if meta is None:
+        meta = {"__name": "meta", "__children": []}
+        data.setdefault("__children", []).append(meta)
+    return meta
+
+
+@mcp.tool()
+def get_map_metadata(map_path: str) -> str:
+    """Read the map-level metadata block (Everest/celeste.yaml meta settings).
+
+    Returns the meta node that stores settings like wipe type, intro type,
+    heart texture, cassette song, and other map-wide overrides.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+
+    lines = [
+        f"Map: {data.get('_package', '?')}",
+        f"Package: {data.get('_package', '?')}",
+        "",
+    ]
+
+    meta = _get_meta_node(data)
+    if meta:
+        lines.append("── Meta settings ─────────────────────────")
+        skip = {"__name", "__children"}
+        props = {k: v for k, v in meta.items() if k not in skip}
+        if props:
+            for k, v in sorted(props.items()):
+                lines.append(f"  {k:30s} = {v!r}")
+        else:
+            lines.append("  (no meta properties set)")
+
+        for child in meta.get("__children", []):
+            cname = child.get("__name", "?")
+            lines.append(f"\n  [{cname}]")
+            for k, v in child.items():
+                if k not in ("__name", "__children"):
+                    lines.append(f"    {k} = {v!r}")
+    else:
+        lines.append("No meta node found (this is normal for most maps).")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def set_map_metadata(map_path: str, settings: str) -> str:
+    """Set map-level metadata properties (Everest meta block).
+
+    These properties control map-wide behaviour like wipe type, mountain
+    colours, intro cutscene, heart/cassette song overrides, etc.
+
+    Common keys:
+      IntroType       – "WalkInRight", "WalkInLeft", "Jump", "WakeUp", etc.
+      Wipe            – "Mountain", "Curtain", "HeartWipe", "KeyDoor", etc.
+      ColorGrade      – e.g. "none", "oldsite", "reflection"
+      DarknessAlpha   – float 0.0-1.0
+      BloomBase       – float
+      BloomStrength   – float
+      Dreaming        – bool
+      CassetteNoteColor – hex color string
+
+    Args:
+        map_path: Path to the .bin file
+        settings: JSON object of meta key/value pairs to set,
+                  e.g. '{"Wipe": "Mountain", "Dreaming": true}'
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+
+    try:
+        props = json.loads(settings)
+    except json.JSONDecodeError:
+        return f"Invalid JSON settings: {settings}"
+    if not isinstance(props, dict):
+        return "settings must be a JSON object."
+
+    meta = _ensure_meta_node(data)
+    applied = []
+    for k, v in props.items():
+        if v is None:
+            if k in meta:
+                del meta[k]
+                applied.append(f"-{k}")
+        else:
+            meta[k] = v
+            applied.append(f"{k}={v!r}")
+
+    cb.write_map(path, data)
+    return (
+        f"Map metadata updated for '{data.get('_package', '?')}':\n"
+        + ("  " + ", ".join(applied) if applied else "  (no changes)")
+    )
+
+
+@mcp.tool()
+def get_map_dependencies(map_path: str) -> str:
+    """Read the mod dependencies list from a map's everest.yaml or meta node.
+
+    Scans the workspace for an everest.yaml alongside the map file, and also
+    reads the Deps child element of the meta node if present.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    lines = [f"Dependencies for: {path.stem}"]
+
+    # 1. Check everest.yaml in same dir and parent dirs
+    yaml_content = None
+    yaml_path = None
+    for search_dir in [path.parent, path.parent.parent, WORKSPACE]:
+        for fname in ("everest.yaml", "everest.yml"):
+            candidate = search_dir / fname
+            if candidate.exists():
+                try:
+                    yaml_content = candidate.read_text(encoding="utf-8", errors="replace")
+                    yaml_path = candidate.relative_to(WORKSPACE)
+                    break
+                except OSError:
+                    pass
+        if yaml_content:
+            break
+
+    if yaml_content:
+        lines.append(f"\n── everest.yaml ({yaml_path}) ─────────────────")
+        lines.append(yaml_content[:3000])
+        if len(yaml_content) > 3000:
+            lines.append("  ... (truncated)")
+    else:
+        lines.append("\n── everest.yaml ──────────────────────────────")
+        lines.append("  (not found — create one to declare mod dependencies)")
+
+    # 2. Check meta node Deps
+    data = cb.read_map(path)
+    meta = _get_meta_node(data)
+    if meta:
+        deps_el = None
+        for child in meta.get("__children", []):
+            if child.get("__name", "").lower() in ("deps", "dependencies"):
+                deps_el = child
+                break
+        if deps_el:
+            lines.append("\n── Meta/Deps node ────────────────────────────")
+            for dep in deps_el.get("__children", []):
+                dname = dep.get("Name", dep.get("name", "?"))
+                dver = dep.get("Version", dep.get("version", "?"))
+                lines.append(f"  {dname} >= {dver}")
+        else:
+            lines.append("\n── Meta/Deps node ────────────────────────────")
+            lines.append("  (none)")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def set_map_dependencies(map_path: str, dependencies: str) -> str:
+    """Write or update the mod dependency list in the map's everest.yaml.
+
+    Creates or replaces the everest.yaml file in the same directory as the map.
+
+    Args:
+        map_path: Path to the .bin file
+        dependencies: JSON array of dependency objects, each with "Name" and
+                      "Version" fields. Use "Celeste" and "Everest" as base deps.
+                      Example: '[{"Name":"Everest","Version":"1.0.0"},
+                                  {"Name":"CommunalHelper","Version":"1.8.0"}]'
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    try:
+        dep_list = json.loads(dependencies)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {dependencies}"
+    if not isinstance(dep_list, list):
+        return "dependencies must be a JSON array."
+
+    # Validate entries
+    for i, d in enumerate(dep_list):
+        if not isinstance(d, dict):
+            return f"Entry {i} must be an object with Name and Version."
+        if "Name" not in d or "Version" not in d:
+            return f"Entry {i} missing Name or Version field."
+
+    # Build YAML content (hand-rolled to avoid requiring pyyaml)
+    data = cb.read_map(path)
+    pkg = data.get("_package", path.stem)
+    lines = ["- Name: " + str(pkg), "  Version: 1.0.0", "  Dependencies:"]
+    for d in dep_list:
+        lines.append(f"    - Name: {d['Name']}")
+        lines.append(f"      Version: {d['Version']}")
+
+    yaml_text = "\n".join(lines) + "\n"
+    yaml_file = path.parent / "everest.yaml"
+    yaml_file.write_text(yaml_text, encoding="utf-8")
+
+    rel = yaml_file.relative_to(WORKSPACE)
+    return (
+        f"everest.yaml written: {rel}\n"
+        f"  {len(dep_list)} dependenc{'y' if len(dep_list) == 1 else 'ies'} declared:\n"
+        + "\n".join(f"  - {d['Name']} >= {d['Version']}" for d in dep_list)
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LÖNN MANAGER — plugin bridge (writes Lua plugin + HTTP status helpers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_LOENN_MANAGER_LUA = r'''-- loenn_mcp_manager.lua
+-- Lönn plugin that exposes a live HTTP bridge to the loenn-mcp MCP server.
+-- Drop this file into your Lönn plugins/ folder (or mod's Loenn/plugins/).
+-- Requires: Lönn 0.7.0+ (lua-http or love.thread http support)
+
+local mcp = {}
+
+mcp._VERSION = "1.0.0"
+mcp._MCP_HOST = os.getenv("LOENN_MCP_HOST") or "http://localhost:8080"
+
+-- ── Internal helpers ──────────────────────────────────────────────────────────
+
+local function _post(endpoint, payload)
+    -- Uses Lönn's built-in http if available, falls back to os.execute + curl
+    local url = mcp._MCP_HOST .. endpoint
+    local body = require("json").encode(payload or {})
+    local ok, res
+    -- Try Lönn/LOVE http first
+    if love and love.filesystem then
+        local http = require("socket.http")
+        local ltn12 = require("ltn12")
+        local resp = {}
+        local _, code = http.request({
+            url = url,
+            method = "POST",
+            headers = {
+                ["Content-Type"] = "application/json",
+                ["Content-Length"] = tostring(#body),
+            },
+            source = ltn12.source.string(body),
+            sink   = ltn12.sink.table(resp),
+        })
+        return code == 200, table.concat(resp)
+    end
+    -- Fallback: curl (Windows & Linux)
+    local tmpIn  = os.tmpname() .. ".json"
+    local tmpOut = os.tmpname() .. ".json"
+    local f = io.open(tmpIn, "w") f:write(body) f:close()
+    os.execute(string.format(
+        'curl -s -X POST -H "Content-Type: application/json" --data @%s %s -o %s',
+        tmpIn, url, tmpOut
+    ))
+    local g = io.open(tmpOut, "r")
+    local result = g and g:read("*a") or ""
+    if g then g:close() end
+    os.remove(tmpIn) os.remove(tmpOut)
+    return true, result
+end
+
+-- ── Public API ─────────────────────────────────────────────────────────────
+
+--- Ping the MCP server and return version info
+function mcp.ping()
+    local ok, body = _post("/ping", {})
+    return ok, body
+end
+
+--- Reload the currently open map from the MCP server's workspace copy
+function mcp.sync_reload(map_path)
+    return _post("/tools/read_map_overview", { map_path = map_path })
+end
+
+--- Push an entity from Lönn to MCP (add_entity call)
+function mcp.push_entity(map_path, room_name, entity)
+    return _post("/tools/add_entity", {
+        map_path    = map_path,
+        room_name   = room_name,
+        entity_name = entity.name or entity._name,
+        x           = entity.x or 0,
+        y           = entity.y or 0,
+        properties  = require("json").encode(entity),
+    })
+end
+
+--- Push room settings to MCP (update_room_settings call)
+function mcp.push_room_settings(map_path, room_name, settings_table)
+    return _post("/tools/update_room_settings", {
+        map_path  = map_path,
+        room_name = room_name,
+        settings  = require("json").encode(settings_table),
+    })
+end
+
+--- Push a styleground to MCP
+function mcp.push_styleground(map_path, effect_name, layer, props_table)
+    return _post("/tools/add_styleground", {
+        map_path    = map_path,
+        effect_name = effect_name,
+        layer       = layer or "bg",
+        properties  = require("json").encode(props_table or {}),
+    })
+end
+
+--- Analyze the map via MCP ML analyzer
+function mcp.analyze_assets(map_path)
+    return _post("/tools/analyze_map_assets", { map_path = map_path })
+end
+
+--- Get map dependencies
+function mcp.get_dependencies(map_path)
+    return _post("/tools/get_map_dependencies", { map_path = map_path })
+end
+
+-- ── Lönn Plugin Registration ───────────────────────────────────────────────
+
+-- Register as a Lönn plugin tool menu item if running inside Lönn
+if lonn and lonn.registerPlugin then
+    lonn.registerPlugin({
+        name    = "MCP Manager",
+        version = mcp._VERSION,
+        menu    = {
+            {
+                label  = "Ping MCP Server",
+                action = function()
+                    local ok, resp = mcp.ping()
+                    if ok then
+                        lonn.notify("MCP: " .. tostring(resp))
+                    else
+                        lonn.notify("MCP server not reachable at " .. mcp._MCP_HOST)
+                    end
+                end,
+            },
+            {
+                label  = "Sync / Reload Map",
+                action = function()
+                    local path = lonn.getCurrentMapPath and lonn.getCurrentMapPath()
+                    if not path then lonn.notify("No map open.") return end
+                    local ok, resp = mcp.sync_reload(path)
+                    lonn.notify(ok and "Synced." or ("Sync failed: " .. tostring(resp)))
+                end,
+            },
+            {
+                label  = "Analyze Map Assets (ML)",
+                action = function()
+                    local path = lonn.getCurrentMapPath and lonn.getCurrentMapPath()
+                    if not path then lonn.notify("No map open.") return end
+                    local ok, resp = mcp.analyze_assets(path)
+                    lonn.notify(ok and "Analysis done. Check MCP output." or "Analysis failed.")
+                end,
+            },
+        },
+    })
+end
+
+return mcp
+'''
+
+
+@mcp.tool()
+def install_loenn_manager(target_dir: str = "Loenn/plugins") -> str:
+    """Install the Lönn MCP Manager plugin into the Lönn plugins directory.
+
+    Writes loenn_mcp_manager.lua to the specified directory. Drop this
+    plugin into your Lönn plugins/ folder or your mod's Loenn/plugins/
+    to enable live two-way communication between Lönn and this MCP server.
+
+    Features of the installed plugin:
+      - Ping MCP server health check
+      - Sync/reload current map from MCP workspace
+      - Push entity/room-settings/styleground changes from Lönn → MCP
+      - Trigger ML asset analysis from inside Lönn
+      - Registered as a Lönn tool menu under "MCP Manager"
+
+    Args:
+        target_dir: Directory to install into (default: Loenn/plugins)
+    """
+    target = (WORKSPACE / target_dir).resolve()
+    try:
+        target.relative_to(WORKSPACE)
+    except ValueError:
+        return "target_dir must be within the workspace."
+
+    target.mkdir(parents=True, exist_ok=True)
+    lua_file = target / "loenn_mcp_manager.lua"
+    lua_file.write_text(_LOENN_MANAGER_LUA, encoding="utf-8")
+
+    rel = lua_file.relative_to(WORKSPACE)
+    return (
+        f"Lönn MCP Manager plugin installed: {rel}\n\n"
+        f"Usage:\n"
+        f"  1. Copy {rel} into your Lönn installation's plugins/ folder\n"
+        f"     or your mod's Loenn/plugins/ directory.\n"
+        f"  2. Set LOENN_MCP_HOST env var (default: http://localhost:8080)\n"
+        f"     to point at this MCP server's HTTP endpoint.\n"
+        f"  3. Restart Lönn — a 'MCP Manager' menu will appear in Tools.\n\n"
+        f"Plugin API (call from Lua):\n"
+        f"  local mcp = require('loenn_mcp_manager')\n"
+        f"  mcp.ping()                          -- health check\n"
+        f"  mcp.push_room_settings(path, room, {{dark=true}})\n"
+        f"  mcp.push_styleground(path, 'parallax', 'bg', {{texture='…'}})\n"
+        f"  mcp.analyze_assets(path)            -- ML analysis\n"
+        f"  mcp.get_dependencies(path)          -- read everest.yaml\n"
+    )
+
+
+@mcp.tool()
+def get_loenn_manager_source() -> str:
+    """Return the source code of the Lönn MCP Manager plugin.
+
+    Use this to inspect or copy the plugin code without writing it to disk.
+    """
+    return _LOENN_MANAGER_LUA
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ML ASSET ANALYSIS — Maddie480 graphics dump + Lönn source patterns
+# ═══════════════════════════════════════════════════════════════════════════════
+
+try:
+    from . import graphics_analyzer          # installed package
+except ImportError:
+    try:
+        import graphics_analyzer             # run directly from source
+    except ImportError:
+        graphics_analyzer = None             # optional module
+
+
+@mcp.tool()
+def analyze_map_assets(
+    map_path: str,
+    check_textures: bool = True,
+    check_tilesets: bool = True,
+    check_entities: bool = True,
+    fetch_asset_index: bool = False,
+) -> str:
+    """ML-style analysis of a map's assets against the Maddie480 graphics dump.
+
+    Extracts all texture references (parallax backgrounds, decals, entity
+    textures) from the map and cross-references them against the known
+    Celeste graphics dump from maddie480.ovh/celeste/graphics-dump-browser.
+
+    Also validates entity names against the Lönn source entity catalog and
+    detects unknown / missing assets that would cause in-game errors.
+
+    Args:
+        map_path: Path to the .bin file
+        check_textures: Validate parallax/decal texture paths
+        check_tilesets: Validate tileset character references
+        check_entities: Validate entity names against Lönn catalog
+        fetch_asset_index: If True, attempt to fetch the asset index from
+                           maddie480.ovh (requires network access). If False,
+                           uses the built-in known-asset catalog.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    if graphics_analyzer is not None:
+        return graphics_analyzer.analyze_map_assets(
+            path=path,
+            workspace=WORKSPACE,
+            check_textures=check_textures,
+            check_tilesets=check_tilesets,
+            check_entities=check_entities,
+            fetch_asset_index=fetch_asset_index,
+        )
+
+    # Fallback: built-in analysis without the optional module
+    data = cb.read_map(path)
+    rooms = cb.get_rooms(data)
+    lines = [
+        f"Asset Analysis: {path.stem}",
+        f"  Rooms: {len(rooms)}",
+        "",
+    ]
+
+    textures_found: dict[str, int] = {}
+    entity_names: dict[str, int] = {}
+    tileset_chars: set[str] = set()
+
+    for room in rooms:
+        for child in room.get("__children", []):
+            cname = child.get("__name", "")
+            if cname in ("fgdecals", "bgdecals"):
+                for dec in child.get("__children", []):
+                    t = dec.get("texture", "")
+                    if t:
+                        textures_found[t] = textures_found.get(t, 0) + 1
+            elif cname == "entities":
+                for ent in child.get("__children", []):
+                    n = ent.get("__name", "")
+                    if n:
+                        entity_names[n] = entity_names.get(n, 0) + 1
+                    # entity-level texture
+                    for k in ("texture", "sprite", "atlas"):
+                        t = ent.get(k, "")
+                        if t:
+                            textures_found[t] = textures_found.get(t, 0) + 1
+            elif cname in ("solids", "bg"):
+                text = child.get("innerText", "")
+                for ch in text:
+                    if ch not in ("0", "\n", "\r"):
+                        tileset_chars.add(ch)
+
+    # Styleground textures
+    style = cb.find_child(data, "Style")
+    if style:
+        for layer_name in ("Foregrounds", "Backgrounds"):
+            layer_el = cb.find_child(style, layer_name)
+            if layer_el:
+                for sg in layer_el.get("__children", []):
+                    t = sg.get("texture", "")
+                    if t:
+                        textures_found[t] = textures_found.get(t, 0) + 1
+
+    if check_textures and textures_found:
+        lines.append(f"── Texture References ({len(textures_found)} unique) ─────")
+        for t, cnt in sorted(textures_found.items(), key=lambda x: -x[1])[:30]:
+            lines.append(f"  {cnt:3}×  {t}")
+        if len(textures_found) > 30:
+            lines.append(f"  ... +{len(textures_found) - 30} more")
+        lines.append("")
+
+    if check_entities and entity_names:
+        lines.append(f"── Entity Types ({len(entity_names)} unique) ──────────────")
+        # Known vanilla entities from Lönn source
+        vanilla = _VANILLA_ENTITIES
+        unknown = []
+        for n, cnt in sorted(entity_names.items(), key=lambda x: -x[1]):
+            tag = ""
+            if n not in vanilla:
+                tag = "  ⚠ unknown/modded"
+                unknown.append(n)
+            lines.append(f"  {cnt:3}×  {n}{tag}")
+        lines.append("")
+        if unknown:
+            lines.append(
+                f"  Note: {len(unknown)} entity type(s) not in vanilla catalog "
+                f"— likely mod entities (check your mod's Loenn/entities/ folder)"
+            )
+            lines.append("")
+
+    if check_tilesets:
+        lines.append(f"── Tileset Characters Used: {sorted(tileset_chars)} ───────")
+        lines.append(
+            "  (Map against ForegroundTiles.xml / BackgroundTiles.xml "
+            "to verify all chars are defined)"
+        )
+        lines.append("")
+
+    lines.append("── Maddie480 Asset Index ─────────────────────────")
+    if fetch_asset_index:
+        lines.append(
+            "  Set fetch_asset_index=True to query:\n"
+            "  https://maddie480.ovh/celeste/graphics-dump-browser\n"
+            "  This requires network access. Install the optional\n"
+            "  graphics_analyzer module for full ML-powered analysis."
+        )
+    else:
+        lines.append(
+            "  To cross-reference with the full Celeste graphics dump:\n"
+            "    1. Visit: https://maddie480.ovh/celeste/graphics-dump-browser\n"
+            "    2. Or run with fetch_asset_index=True (requires network)\n"
+            "    3. Or install graphics_analyzer module for offline ML analysis."
+        )
+
+    return "\n".join(lines)
+
+
+# Vanilla Celeste entity catalog derived from CelestialCartographers/Loenn source
+_VANILLA_ENTITIES = frozenset({
+    "player", "checkpoint", "strawberry", "goldenBerry", "spring",
+    "jumpThru", "refill", "spikes", "spikeUp", "spikeDown",
+    "spikeLeft", "spikeRight", "triggerSpikesUp", "triggerSpikesDown",
+    "triggerSpikesLeft", "triggerSpikesRight",
+    "crumbleBlock", "fallingBlock", "moveBlock", "crushBlock",
+    "bumper", "seekerBarrier", "seeker", "booster", "feather",
+    "dreamBlock", "dashBlock", "fireBarrier", "iceBlock",
+    "cloud", "cassette", "blackGem", "heartGem", "darkChest",
+    "key", "lock", "door", "zipMover", "swapBlock", "linkedZipMover",
+    "floatySpaceBlock", "glassBlock", "sinkingPlatform",
+    "spikesOrigDown", "spikesOrigUp", "spikesOrigLeft", "spikesOrigRight",
+    "colorSwitch", "bridgeTileController", "clutterDoor", "clutterSwitch",
+    "exitBlock", "fakeWall", "fakeBlock", "bonfire", "torch",
+    "lamp", "memorial", "bird", "birdTutorial", "lightbeam",
+    "cobweb", "flutterbirdIntro", "blackhole", "payphone",
+    "powerSourceNumber", "puffer", "rotateSpinner", "trackSpinner",
+    "spinner", "templeBigEyeball", "templeGate", "theo",
+    "theoPhone", "touchSwitch", "turnBlock", "wallBouncingBall",
+    "water", "waterfall", "whiteblock", "wire",
+    "finalBoss", "finalBossBeam", "finalBossMovingBlock",
+    "lightSourceBlocker", "npc", "car", "towerViewer",
+    "risingLava", "sandwichLava", "tentacles",
+    "reflectionHeartStatue", "resortPlatform", "resortLantern",
+    "reflectPanel", "glider", "theoCrystal", "flingBird",
+    "moonCreature", "memorialTextController", "coreModeToggle",
+    "frozenWaterfall", "iceBlock", "movingPlatform",
+    "switchGate", "flagSwitchGate", "groupSwitchGate",
+    "introCar", "introCornerWalkPast", "introRockingPlatform",
+    "introCrusher", "introWalkPast", "windController",
+    "killbox", "summitCheckpoint", "summitCloud",
+    "coreMessage", "playbackTutorial", "playbackBillboard",
+    "eventTrigger",
+})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AI-POWERED ANALYSIS TOOLS (Claude API)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def ai_analyze_map(
+    map_path: str,
+    analysis_type: str = "general",
+    model: str = "claude-3-5-sonnet-20241022",
+) -> str:
+    """Analyze a map using Claude AI and get improvement suggestions.
+
+    Requires ANTHROPIC_API_KEY environment variable.
+    Get your API key from: https://console.anthropic.com/
+
+    Args:
+        map_path: Path to the .bin file
+        analysis_type: Type of analysis - "general", "difficulty", "visual", "flow"
+        model: Claude model (default: claude-3-5-sonnet-20241022)
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    return ai_analyzer.ai_analyze_map(path, WORKSPACE, analysis_type, model)
+
+
+@mcp.tool()
+def ai_describe_room(
+    map_path: str,
+    room_name: str,
+    style: str = "atmospheric",
+    model: str = "claude-3-5-sonnet-20241022",
+) -> str:
+    """Generate an AI-powered narrative description of a room.
+
+    Requires ANTHROPIC_API_KEY environment variable.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name (with or without 'lvl_' prefix)
+        style: Description style - "atmospheric", "technical", "story", "brief"
+        model: Claude model (default: claude-3-5-sonnet-20241022)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+    return ai_analyzer.ai_generate_room_description(
+        room, data.get("_package", "?"), style, model
+    )
+
+
+@mcp.tool()
+def ai_suggest_entities(
+    map_path: str,
+    room_name: str,
+    goal: str = "improve_flow",
+    model: str = "claude-3-5-sonnet-20241022",
+) -> str:
+    """Get AI suggestions for entity placement in a room.
+
+    Requires ANTHROPIC_API_KEY environment variable.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        goal: Suggestion goal - "improve_flow", "add_challenge", "reduce_difficulty", "add_secrets"
+        model: Claude model (default: claude-3-5-sonnet-20241022)
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    return ai_analyzer.ai_suggest_entities(path, WORKSPACE, room_name, goal, model)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

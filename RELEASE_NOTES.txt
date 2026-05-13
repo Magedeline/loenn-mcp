@@ -1,3 +1,46 @@
+loenn-mcp v5.1.0
+================
+
+AI-Powered Analysis — Claude API integration for intelligent map design feedback.
+
+
+WHAT'S NEW IN v5.1.0
+--------------------
+
+3 new AI-powered MCP tools (63 tools total):
+
+  ai_analyze_map          — Claude-powered design feedback on maps
+                            Analysis types: general, difficulty, visual, flow
+                            Requires ANTHROPIC_API_KEY environment variable
+
+  ai_describe_room        — Generate narrative descriptions of rooms
+                            Styles: atmospheric, technical, story, brief
+                            Requires ANTHROPIC_API_KEY environment variable
+
+  ai_suggest_entities     — Get AI entity placement recommendations
+                            Goals: improve_flow, add_challenge,
+                            reduce_difficulty, add_secrets
+                            Requires ANTHROPIC_API_KEY environment variable
+
+New module: loenn_mcp/ai_analyzer.py
+  - Anthropic Claude API integration
+  - Graceful degradation with helpful error messages when API key not set
+  - Support for multiple Claude models (default: claude-3-5-sonnet-20241022)
+
+New dependency:
+  - anthropic >= 0.40.0 (required for AI tools, graceful fallback if not installed)
+
+Setup:
+  pip install loenn-mcp
+  $env:ANTHROPIC_API_KEY="sk-ant-api03-..."
+
+Usage:
+  ai_analyze_map(map_path="Maps/MyMod/1-City.bin", analysis_type="difficulty")
+  ai_describe_room(map_path="...", room_name="lvl_a-03", style="atmospheric")
+  ai_suggest_entities(map_path="...", room_name="lvl_a-03", goal="add_challenge")
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 loenn-mcp v3.0.1
 ================
 

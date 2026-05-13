@@ -391,23 +391,9 @@ Generate complete maps procedurally using Perlin noise and Voronoi diagrams, ins
 | `summit` | Sparse platforms | Wind effects |
 
 ### Usage
-
-```python
-# Generate with specific seed (reproducible)
 generate_terrain_map(seed=42, difficulty=3)
 
-# Customize grid size and biomes
-generate_terrain_map(
-    seed=1234,
-    width_rooms=5,
-    height_rooms=4,
-    biome_set="mountain,cave,summit",
-    difficulty=4,
-    frequency=12.0,
-    voronoi_points=16
-)
-
-# Preview biome layout first (no file created)
+# Preview terrain biomes
 preview_terrain_biomes(seed=42, width_rooms=4, height_rooms=3)
 # Output:
 # [P] [^] [^] [F]
@@ -484,6 +470,65 @@ Results persist across sessions so repeated queries return instantly.
 
 ---
 
+## AI-Powered Analysis (NEW — Claude API)
+
+Leverage Anthropic's Claude AI for intelligent map design feedback, narrative generation, and entity placement suggestions.
+
+**Setup:**
+```bash
+# Install with AI support (anthropic package included)
+pip install loenn-mcp
+
+# Set your API key (get from https://console.anthropic.com/)
+$env:ANTHROPIC_API_KEY="sk-ant-api03-..."
+```
+
+**Available Tools:**
+
+| Tool | Description |
+|---|---|
+| `ai_analyze_map` | Claude-powered design feedback (general/difficulty/visual/flow analysis) |
+| `ai_describe_room` | Generate narrative descriptions of rooms in various styles |
+| `ai_suggest_entities` | Get specific entity placement recommendations with coordinates |
+
+**Example prompts:**
+
+```python
+# Get AI feedback on your map design
+ai_analyze_map(map_path="Maps/MyMod/1-City.bin", analysis_type="general")
+# → "Strengths: Good checkpoint distribution. Suggestions: Add more strawberries in rooms 3-5..."
+
+# Generate atmospheric room descriptions
+ai_describe_room(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", style="atmospheric")
+# → "A windswept precipice where ancient stone meets howling gales..."
+
+# Get entity placement suggestions
+ai_suggest_entities(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", goal="add_challenge")
+# → "1. Add spikes at (120, 80) for a timing challenge..."
+```
+
+**Analysis Types:**
+- `general` — Overall design assessment with improvement suggestions
+- `difficulty` — Difficulty curve and balancing analysis
+- `visual` — Visual variety and theme consistency feedback
+- `flow` — Player movement flow and navigation clarity
+
+**Description Styles:**
+- `atmospheric` — Evocative, mood-focused descriptions
+- `technical` — Gameplay-focused descriptions
+- `story` — Narrative/story snippets
+- `brief` — Concise 1-2 sentence summaries
+
+**Suggestion Goals:**
+- `improve_flow` — Better player guidance and navigation
+- `add_challenge` — Skill-testing elements
+- `reduce_difficulty` — Accessibility improvements
+- `add_secrets` — Exploration rewards
+
+The AI tools gracefully degrade if `ANTHROPIC_API_KEY` is not set, returning helpful error messages.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -544,6 +589,15 @@ Integrates game analysis concepts from [pirua-game/ai_game_base_analysis_cli_mcp
 - **Batch validation** — whole-map playability checks (spawns, floors, bounds) with optional auto-fix
 - **Suggestions** — actionable improvement suggestions based on room analysis
 
+### `ai_analyzer.py` — AI-powered analysis (NEW)
+
+Integrates Anthropic's Claude API for intelligent map design assistance:
+
+- **Map analysis** — AI-powered feedback on design, difficulty, visuals, and flow
+- **Room descriptions** — Generate narrative descriptions in atmospheric, technical, story, or brief styles
+- **Entity suggestions** — Get specific entity placement recommendations with coordinates
+- **Graceful degradation** — Helpful error messages when `ANTHROPIC_API_KEY` is not configured
+
 ### `server.py` — MCP server
 
 Built with [FastMCP](https://github.com/jlowin/fastmcp). All file paths are resolved relative to `LOENN_MCP_WORKSPACE` with path-traversal protection. Map writes are atomic (parse → mutate → write). External downloads require explicit `confirm_download=True`.
@@ -554,9 +608,10 @@ Built with [FastMCP](https://github.com/jlowin/fastmcp). All file paths are reso
 
 - Python 3.9+
 - `fastmcp >= 3.0.0`
+- `anthropic >= 0.40.0` (optional — only needed for AI-powered tools)
 - `Pillow >= 9.0` (optional — only needed for `generate_map_from_image`)
 
-Install with image support: `pip install loenn-mcp[image]`
+Install with all optional features: `pip install loenn-mcp[image]`
 
 No Celeste installation required to parse, generate, or preview maps.
 

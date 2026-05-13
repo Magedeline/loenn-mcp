@@ -25,6 +25,7 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "fastmcp>=3.0.0,<4",
+    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
