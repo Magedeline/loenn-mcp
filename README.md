@@ -4,173 +4,135 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 
-**Celeste map editor for AI agents** — a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that lets GitHub Copilot, Claude, and other MCP clients read, edit, analyze, **procedurally generate**, and preview Celeste `.bin` map files without ever opening Lönn.
+**AI-powered Celeste map editor** — A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that brings full Celeste `.bin` map editing to Claude, GitHub Copilot, and other MCP clients. Read, edit, analyze, generate, and preview maps without opening Lönn.
 
-Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works with maps created by [Lönn](https://github.com/CelestialCartographers/Loenn) or [Ahorn](https://github.com/CelestialCartographers/Ahorn).
-
----
+Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [Lönn](https://github.com/CelestialCartographers/Loenn) or [Ahorn](https://github.com/CelestialCartographers/Ahorn).
 
 ## Features
 
-### 87 MCP tools across 19 categories
+**87 MCP tools** across 19 categories for complete map manipulation and AI-assisted design.
 
-**Map Reading**
-| Tool | Description |
-|---|---|
-| `list_maps` | List all `.bin` files in the project |
-| `read_map_overview` | Summary of rooms, entities, triggers, and stylegrounds |
-| `read_room` | Full detail for a single room: tiles, entities, triggers, decals |
-| `get_room_tiles` | Raw tile grid (foreground or background) for a room |
+### Core Tools
 
-**Map Reading Extensions (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `read_map_metadata` | Quick metadata (package, room count, world bounds) without full read |
-| `search_entities` | Search entities across rooms by type, position, and room |
-| `search_triggers` | Search triggers across rooms by type |
-| `compare_rooms` | Side-by-side comparison of two rooms (size, difficulty, entities) |
+**Reading & Querying**
+- `list_maps` — List all `.bin` files
+- `read_map_overview` — Summary of rooms, entities, triggers, stylegrounds
+- `read_room` — Full room details (tiles, entities, triggers, decals)
+- `get_room_tiles` — Raw tile grid (FG or BG)
+- `read_map_metadata` — Quick metadata without full read
+- `search_entities` — Find entities by type, position, room
+- `search_triggers` — Find triggers by type
+- `compare_rooms` — Side-by-side room comparison
 
-**Map Editing**
-| Tool | Description |
-|---|---|
-| `add_entity` | Place an entity in a room (auto-assigns ID) |
-| `remove_entity` | Delete an entity by ID |
-| `add_trigger` | Place a trigger (rectangular region) in a room, with optional path nodes |
-| `remove_trigger` | Delete a trigger by ID |
-| `set_room_tiles` | Replace the tile grid for a room |
-| `add_room` | Create a new room with custom position/size |
-| `remove_room` | Delete a room from the map |
-| `create_map` | Create a new empty `.bin` map file |
+**Editing**
+- `add_entity` / `remove_entity` — Place or delete entities
+- `update_entity` / `move_entity` — Modify entity properties or position
+- `add_trigger` / `remove_trigger` — Place or delete triggers
+- `set_room_tiles` — Replace tile grid
+- `add_room` / `remove_room` — Create or delete rooms
+- `create_map` — Create new `.bin` file
+- `update_room` — Modify room properties (music, dark, wind, etc.)
+- `clone_room` — Duplicate a room
+- `batch_add_entities` — Add multiple entities at once
+- `resize_room` — Change room dimensions
 
-**Map Editing Extensions (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `update_entity` | Update properties of an existing entity by ID |
-| `move_entity` | Move an entity to a new position |
-| `update_room` | Update room-level properties (music, dark, wind, etc.) |
-| `clone_room` | Clone a room to a new name and position |
-| `batch_add_entities` | Add multiple entities in one call (JSON array) |
-| `resize_room` | Change room dimensions |
+**Decals & Effects**
+- `list_decals` / `add_decal` / `remove_decal` — Manage foreground/background decals
+- `list_stylegrounds` / `add_styleground` / `update_styleground` / `remove_styleground` — Manage map effects
 
-**Decals (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `list_decals` | List all decals in a room (FG or BG) |
-| `add_decal` | Add a decal with texture, position, and scale |
-| `remove_decal` | Remove a decal by index |
+**Definitions & Catalog**
+- `list_entity_definitions` / `get_entity_definition` — Browse entity types
+- `list_trigger_definitions` / `get_trigger_definition` — Browse trigger types
+- `list_effect_definitions` / `get_effect_definition` — Browse effect types
 
-**Stylegrounds**
-| Tool | Description |
-|---|---|
-| `list_stylegrounds` | List foreground + background effects (with indices) |
-| `add_styleground` | Add an effect (parallax, custom Lua effect, `apply` group, etc.) to FG or BG |
-| `remove_styleground` | Remove an effect by index |
-| `update_styleground` | Merge property changes into an existing effect |
+### Analysis & Insights
 
-**Entity / Trigger Catalog**
-| Tool | Description |
-|---|---|
-| `list_entity_definitions` | Browse Lönn entity `.lua` files in the project |
-| `get_entity_definition` | Read the full source of a single entity definition |
-| `list_trigger_definitions` | Browse Lönn trigger `.lua` files |
-| `list_effect_definitions` | Browse Lönn effect `.lua` files |
+**Basic Analysis**
+- `analyze_map` — Entity counts, type breakdown, world bounds
+- `visualize_map_layout` — ASCII mini-map
+- `preview_map_section` — Detailed ASCII preview
 
-**Catalog Extensions (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `get_trigger_definition` | Read the source of a trigger `.lua` file by name |
-| `get_effect_definition` | Read the source of an effect `.lua` file by name |
+**Advanced Analysis**
+- `analyze_entity_usage` — Entity stats across entire map
+- `analyze_difficulty` — Room/map difficulty estimation
+- `find_entity_references` — Locate all instances of an entity type
+- `detect_map_patterns` — Identify design archetypes (linear, hub, etc.)
+- `analyze_room_connectivity` — Adjacency graph analysis
 
-**Analysis**
-| Tool | Description |
-|---|---|
-| `analyze_map` | Statistics: entity counts, type breakdown, world bounds |
-| `visualize_map_layout` | ASCII mini-map of room positions |
-| `preview_map_section` | Detailed ASCII preview of a map region |
+**Suggestions & Improvements**
+- `suggest_improvements` — Actionable room suggestions
+- `compare_maps` — Structural diff between maps
 
-**Advanced Analysis — gdep-inspired (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `analyze_entity_usage` | Entity usage stats across the entire map |
-| `analyze_difficulty` | Estimate room/map difficulty from hazards, nav aids, tile coverage |
-| `find_entity_references` | Find all occurrences of an entity type across rooms |
-| `detect_map_patterns` | Detect design archetypes (linear, hub, collectible-rich, etc.) |
-| `analyze_room_connectivity` | Adjacency graph: isolated rooms, dead ends, hubs |
+**Wiki & Caching**
+- `wiki_save` / `wiki_search` / `wiki_list` / `wiki_get` — Persist and retrieve analysis results
 
-**Suggestions — gdep-inspired (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `suggest_improvements` | Actionable suggestions for a room (spawns, floors, balance) |
-| `compare_maps` | Structural diff between two map files |
+**Project Management**
+- `get_mod_info` — Project metadata and structure
+- `validate_map` / `batch_validate_and_fix` — Playability validation with auto-fix
+- `export_room_json` / `import_room_json` — JSON room exchange
 
-**Wiki / Cache — gdep-inspired (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `wiki_save` | Persist analysis results locally for instant repeated queries |
-| `wiki_search` | Search cached wiki entries by key, content, or tags |
-| `wiki_list` | List all wiki entries |
-| `wiki_get` | Retrieve a specific wiki entry |
+**Diffing**
+- `summarize_map_diff` — Track map evolution with snapshots
 
-**Mod Project (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `get_mod_info` | Project info: everest.yaml, map count, PCG library, wiki |
-| `validate_map` | Whole-map playability validation with optional auto-fix |
+### Rendering
 
-**Import / Export (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `export_room_json` | Export a room as JSON for external editing or sharing |
-| `import_room_json` | Import a room from JSON into a map |
+- `render_map_html` — Interactive HTML preview (zoom, pan, search, minimap)
 
-**Diff & Fix — gdep-inspired (NEW in v5)**
-| Tool | Description |
-|---|---|
-| `summarize_map_diff` | Snapshot-based structural diffing for tracking map evolution |
-| `batch_validate_and_fix` | Batch playability checks with optional auto-fix |
+### Procedural Generation
 
-**Rendering**
-| Tool | Description |
-|---|---|
-| `render_map_html` | Interactive HTML preview (zoom, pan, room details, minimap, search) |
+**Pattern-Based Generation**
+- `build_pattern_library` — Extract patterns from existing maps
+- `generate_room_from_pattern` — Generate rooms with strategy + seed
+- `ingest_external_map` — Download and extract patterns from GameBanana
 
-**Procedural Generation**
-| Tool | Description |
-|---|---|
-| `build_pattern_library` | Scan local `.bin` maps and extract room patterns into a reusable JSON library |
-| `generate_room_from_pattern` | Generate a new room using patterns + a strategy + seed |
-| `validate_room` | Check a room for playability issues (spawn, floor, bounds) |
-| `ingest_external_map` | Download maps from external URLs (GameBanana etc.) and extract patterns |
+**Image & Terrain Generation**
+- `generate_map_from_image` — Convert color-mapped images to playable maps
+- `generate_terrain_map` — Procedural maps with Perlin noise + Voronoi biomes
+- `preview_terrain_biomes` — Preview biome layout before generation
 
-**Image-to-Map & Terrain Generation (v4)**
-| Tool | Description |
-|---|---|
-| `generate_map_from_image` | Convert a color-mapped image (PNG/JPG/BMP) into a full playable Celeste map |
-| `generate_terrain_map` | Procedural map using seeded Perlin noise + Voronoi biomes |
-| `preview_terrain_biomes` | ASCII preview of biome layout before generating |
+### Procedural Generation (Advanced)
+
+**PCGHelper Tools** — MdMC/WFC tile generation
+- `pcg_mdmc_presets` — List configuration presets
+- `pcg_skeleton_generate` — Layout non-overlapping room skeleton
+- `pcg_markov_fill` — Fill rooms with MdMC/WFC/hybrid
+- `pcg_score_room` — Evaluate interestingness & difficulty
+- `pcg_pipeline` — One-shot end-to-end generation
 
 ---
 
-## Quick Start
+## Installation & Setup
 
-### 1 — Install from PyPI
-
+### Install from PyPI
 ```bash
 pip install loenn-mcp
 ```
 
-Or clone and install from source:
-
+Or from source:
 ```bash
 git clone https://github.com/Maggy-Studio/loenn-mcp
 cd loenn-mcp
 pip install -e .
 ```
 
-### 2 — Connect to GitHub Copilot (VS Code)
+### Connect to Claude Desktop
+Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "loenn-mcp": {
+      "command": "python",
+      "args": ["-m", "loenn_mcp.server"],
+      "env": {
+        "LOENN_MCP_WORKSPACE": "/absolute/path/to/your/mod"
+      }
+    }
+  }
+}
+```
 
-Add to your project's `.vscode/mcp.json`:
-
+### Connect to GitHub Copilot (VS Code)
+Add to `.vscode/mcp.json`:
 ```json
 {
   "servers": {
@@ -186,172 +148,114 @@ Add to your project's `.vscode/mcp.json`:
 }
 ```
 
-Then ask Copilot things like:
-- *"What rooms are in 01_City_A.bin?"*
-- *"Add a strawberry to room a-03 at position (120, 80)"*
-- *"Render an HTML preview of 07_Hell_A.bin and open it"*
-- *"Build a pattern library from all my maps, then generate 5 challenge rooms"*
-
-### 3 — Connect to Claude Desktop
-
-Add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "loenn-mcp": {
-      "command": "python",
-      "args": ["-m", "loenn_mcp.server"],
-      "env": {
-        "LOENN_MCP_WORKSPACE": "/absolute/path/to/your/mod"
-      }
-    }
-  }
-}
-```
-
-### 4 — One-click map preview (standalone)
-
+### Preview Maps Locally
 ```bash
-python -m loenn_mcp.preview_map Maps/Maggy/Main/01_City_A.bin
-python -m loenn_mcp.preview_map Maps/Maggy/Main/01_City_A.bin g-   # filter rooms by prefix
+python -m loenn_mcp.preview_map Maps/01_City_A.bin
+python -m loenn_mcp.preview_map Maps/01_City_A.bin g-   # filter by prefix
 ```
 
-The HTML preview opens in your browser and supports:
-- **Scroll** to zoom, **drag** to pan, **pinch** on touch
-- Click a room → detail panel (entities, triggers, size)
-- Live **search** filter (`F` to focus)
-- **Minimap** with viewport indicator
-- Keyboard shortcuts: `+` / `-` zoom, `0` fit, `Esc` deselect
+The interactive HTML preview supports zoom, pan, room details, search, and minimap with keyboard shortcuts.
 
 ---
 
-## Procedural Generation (PCG)
+## Procedural Generation
 
-### Generation strategies
+### Generation Strategies
 
 | Strategy | Description |
 |---|---|
-| `balanced` | Mix of exploration and challenge — good default |
+| `balanced` | Mix of exploration and challenge (default) |
 | `exploration` | Open spaces, gentle platforming, few hazards |
 | `challenge` | Dense tiles, many hazards, tight jumps |
 | `speedrun` | Linear path, minimal platforms, fast flow |
 
-### Model profiles
+### Model Profiles
 
-| Profile | Seed behaviour | Best for |
+| Profile | Behavior | Use Case |
 |---|---|---|
-| `creative` | Random seed each call | Maximum room variety |
-| `deterministic` | Stable seed from strategy name | CI pipelines, reproducible layouts |
-| `architect` | Random seed | Emphasis on room shape and connectivity |
+| `creative` | Random seed each call | Maximum variety |
+| `deterministic` | Stable seed from strategy | Reproducible layouts |
+| `architect` | Random seed | Emphasis on shape/connectivity |
 
-### End-to-end pipeline
+### Quick Start Example
 
-```
-1. Build pattern library from existing maps
-2. (Optional) ingest community maps from GameBanana
-3. Create a blank map
-4. Generate rooms with a chosen strategy and seed
-5. Validate each room
-6. Render HTML preview
-```
-
-**Example agent prompts:**
-
-```
-# Step 1 — build pattern library
+```python
+# 1. Build pattern library from existing maps
 build_pattern_library()
 
-# Step 2 — ingest a GameBanana mod for richer pattern data
-ingest_external_map(
-  source_url="https://gamebanana.com/mods/53774",
-  attribution="Spring Collab 2020 (various authors)",
-  confirm_download=True,
-  tags="community,collab"
-)
+# 2. Create a new map
+create_map("Maps/PCG/Generated.bin", "PCG/Generated")
 
-# Step 3 — create map and generate rooms
-create_map("Maps/PCG/MyAIMap.bin", "PCG/MyAIMap")
+# 3. Generate rooms
 generate_room_from_pattern(
-  map_path="Maps/PCG/MyAIMap.bin",
+  map_path="Maps/PCG/Generated.bin",
   room_name="a-01",
   strategy="exploration",
   seed=42,
   model_profile="deterministic"
 )
-generate_room_from_pattern(
-  map_path="Maps/PCG/MyAIMap.bin",
-  room_name="a-02",
-  strategy="challenge",
-  x=320
-)
 
-# Step 4 — validate
-validate_room("Maps/PCG/MyAIMap.bin", "a-01")
-
-# Step 5 — preview
-render_map_html("Maps/PCG/MyAIMap.bin")
+# 4. Validate and preview
+validate_room("Maps/PCG/Generated.bin", "a-01")
+render_map_html("Maps/PCG/Generated.bin")
 ```
 
-### Reproducible generation (seeded)
+### Seeded Generation
 
-Pass `seed=<integer>` and `model_profile="deterministic"` to get the exact same room every time:
-
+Use `seed=<int>` + `model_profile="deterministic"` for reproducible output:
 ```python
-# These two calls produce identical output:
-generate_room_from_pattern(map_path="...", room_name="r1", strategy="challenge", seed=1234, model_profile="deterministic")
-generate_room_from_pattern(map_path="...", room_name="r2", strategy="challenge", seed=1234, model_profile="deterministic")
+# Both calls produce identical rooms
+generate_room_from_pattern(..., strategy="challenge", seed=1234, model_profile="deterministic")
+generate_room_from_pattern(..., strategy="challenge", seed=1234, model_profile="deterministic")
 ```
 
-### GameBanana integration
+### GameBanana Integration
 
-`ingest_external_map` can fetch maps directly from [GameBanana](https://gamebanana.com/games/6460):
-
-```
-# Dry-run (no download) — shows what would happen
+Download and extract patterns from community mods:
+```python
+# Dry-run (preview only)
 ingest_external_map(
   source_url="https://gamebanana.com/mods/53774",
   attribution="Spring Collab 2020",
   confirm_download=False
 )
 
-# Actual download + pattern extraction
+# Download and extract
 ingest_external_map(
   source_url="https://gamebanana.com/mods/53774",
-  attribution="Spring Collab 2020 (various authors, see mod page)",
+  attribution="Spring Collab 2020 (various authors)",
   confirm_download=True,
-  tags="expert,collab"
+  tags="community,expert"
 )
 ```
 
-Downloaded files are saved to `PCG/Datasets/` with an `attribution.json` file.
-**Always verify the mod's licence permits derivative use before building on its patterns.**
+Patterns are saved to `PCG/Datasets/` with attribution. Always verify mod licenses permit derivative use.
 
 ---
 
-## Image-to-Map Conversion (NEW in v4)
+## Image-to-Map Conversion
 
-Convert any color-mapped image directly into a playable Celeste map. Each pixel becomes one 8×8 tile, with colors mapped to tile types and entities.
+Convert color-mapped images directly into playable Celeste maps. Each pixel becomes one 8×8 tile.
 
-### Default color mapping
+### Default Color Mapping
 
 | Color | Hex | Maps to |
 |---|---|---|
-| Black | `#000000` | Solid tile (foreground) |
-| White | `#FFFFFF` | Air (empty space) |
+| Black | `#000000` | Solid tile |
+| White | `#FFFFFF` | Air (empty) |
 | Red | `#FF0000` | Spike hazard |
 | Green | `#00FF00` | Player spawn |
 | Blue | `#0000FF` | Jump-through platform |
-| Yellow | `#FFFF00` | Strawberry collectible |
-| Magenta | `#FF00FF` | Spring (bounce pad) |
+| Yellow | `#FFFF00` | Strawberry |
+| Magenta | `#FF00FF` | Spring |
 | Cyan | `#00FFFF` | Refill crystal |
 | Orange | `#FF8000` | Crumble block |
-| Grey | `#808080` | Background solid (decorative) |
+| Grey | `#808080` | Background solid |
 
 ### Usage
 
 ```python
-# Basic — converts image using default color mapping
+# Basic conversion
 generate_map_from_image(image_path="Assets/my_level.png")
 
 # Custom colors and scale
@@ -359,55 +263,42 @@ generate_map_from_image(
     image_path="Assets/large_map.png",
     output_path="Maps/Custom/level.bin",
     scale=4,  # 4×4 pixel blocks → 1 tile
-    color_map_json='{"#FF0000":"solid","#00FF00":"spawn","#0000FF":"air"}'
+    color_map_json='{"#FF0000":"solid","#00FF00":"spawn"}'
 )
 ```
 
-### How it works
-
-1. The image is loaded and optionally downscaled by `scale` factor
-2. Each pixel is matched to the closest color in the color map (within tolerance)
-3. The grid is split into room-sized chunks (default 40×23 tiles = 320×184 px)
-4. Each chunk becomes a room with proper tiles, entities, and a player spawn
-5. The complete map is written as a `.bin` file
-
-Requires `Pillow` — install with: `pip install loenn-mcp[image]`
+Requires `Pillow`: `pip install loenn-mcp[image]`
 
 ---
 
-## Seeded Terrain Generation (NEW in v4)
+## Seeded Terrain Generation
 
-Generate complete maps procedurally using Perlin noise and Voronoi diagrams, inspired by [AliShazly/map-generator](https://github.com/AliShazly/map-generator).
+Generate complete maps with Perlin noise and Voronoi biomes. Inspired by [AliShazly/map-generator](https://github.com/AliShazly/map-generator).
 
 ### Biomes
 
-| Biome | Character | Terrain |
-|---|---|---|
-| `mountain` | Dense tiles | Tight platforms, spikes |
-| `forest` | Moderate density | Many platforms, springs |
-| `plains` | Open spaces | Gentle platforms, collectibles |
-| `lake` | Sparse tiles | Jump-throughs, refills |
-| `cave` | Enclosed | Crumble blocks, dark rooms |
-| `summit` | Sparse platforms | Wind effects |
+| Biome | Terrain |
+|---|---|
+| `mountain` | Dense tiles, tight platforms, spikes |
+| `forest` | Moderate density, many platforms, springs |
+| `plains` | Open spaces, gentle platforms, collectibles |
+| `lake` | Sparse tiles, jump-throughs, refills |
+| `cave` | Enclosed, crumble blocks, dark rooms |
+| `summit` | Sparse platforms, wind effects |
 
-### Usage
-generate_terrain_map(seed=42, difficulty=3)
+### Quick Example
 
-# Preview terrain biomes
+```python
+# Generate a 4×3 map with seed 42
+generate_terrain_map(seed=42, difficulty=3, width_rooms=4, height_rooms=3)
+
+# Preview biome layout before generating
 preview_terrain_biomes(seed=42, width_rooms=4, height_rooms=3)
 # Output:
 # [P] [^] [^] [F]
 # [~] [P] [^] [M]
 # [C] [~] [P] [F]
 ```
-
-### Generation algorithm
-
-1. **Perlin noise** creates organic heightmap terrain — controls where solid tiles, platforms, and gaps appear
-2. **Voronoi diagrams** partition the map into biome regions — each room inherits the biome of its Voronoi region
-3. **Seeded RNG** ensures the same `seed` + parameters always produce the exact same output
-4. **Difficulty scaling** (1-5) adjusts hazard density, tile coverage, and platform frequency
-5. Biome properties control tile characters, entity types, room flags (dark, underwater, wind)
 
 ### Parameters
 
@@ -423,165 +314,162 @@ preview_terrain_biomes(seed=42, width_rooms=4, height_rooms=3)
 
 ---
 
-## Game Analysis & Wiki (NEW in v5 — gdep-inspired)
+## Analysis & Insights
 
-Advanced analysis tools adapted from game design analysis patterns.
+Advanced analysis tools for map design, difficulty, and patterns.
 
-### Usage examples
+### Quick Examples
 
 ```python
-# Analyze difficulty across all rooms
+# Analyze difficulty
 analyze_difficulty(map_path="Maps/MyMod/1-City.bin")
 
 # Detect gameplay patterns
 detect_map_patterns(map_path="Maps/MyMod/1-City.bin")
-# → "standard-level (7-15 rooms)", "linear-horizontal", "checkpointed (3 checkpoints)"
+# → "standard-level (7-15 rooms)", "linear-horizontal", "checkpointed"
 
-# Get suggestions for a room
+# Get room suggestions
 suggest_improvements(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-01")
 
-# Track map evolution with snapshots
-summarize_map_diff(map_path="Maps/MyMod/1-City.bin")  # saves snapshot
-# ... make edits ...
-summarize_map_diff(map_path="Maps/MyMod/1-City.bin")  # shows diff
+# Track map evolution
+summarize_map_diff(map_path="Maps/MyMod/1-City.bin")  # save snapshot
+# ... edit map ...
+summarize_map_diff(map_path="Maps/MyMod/1-City.bin")  # show diff
 
-# Cache analysis results for instant re-use
-wiki_save(key="city_difficulty", content="Avg difficulty 4.2/10, 3 hard rooms", tags="analysis")
+# Cache results for instant re-use
+wiki_save(key="city_difficulty", content="Avg 4.2/10, 3 hard rooms", tags="analysis")
 wiki_search(query="difficulty")
 
-# Batch validate and auto-fix
+# Batch validation
 batch_validate_and_fix(map_path="Maps/MyMod/1-City.bin", auto_fix=True)
 
-# Search for specific entities
+# Search and clone
 search_entities(map_path="Maps/MyMod/1-City.bin", entity_type="strawberry")
-
-# Clone and modify rooms
 clone_room(map_path="Maps/MyMod/1-City.bin", source_room="lvl_a-01", new_name="lvl_a-01-copy")
 
-# Export/import rooms as JSON
+# Export/import rooms
 export_room_json(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-01")
 import_room_json(map_path="Maps/MyMod/2-Resort.bin", json_path="Export/lvl_a-01.json")
 ```
 
-### Wiki cache
+### Wiki Cache
 
-The wiki stores analysis results in `.loenn_mcp_wiki/` as JSON files.
-Results persist across sessions so repeated queries return instantly.
+Analysis results persist in `.loenn_mcp_wiki/` as JSON files for instant re-use across sessions.
 
 ---
 
-## AI-Powered Analysis (NEW — Claude API)
+## AI-Powered Analysis
 
-Leverage Anthropic's Claude AI for intelligent map design feedback, narrative generation, and entity placement suggestions.
+Leverage Claude AI for intelligent map feedback, room descriptions, and entity suggestions.
 
-**Setup:**
+### Setup
 ```bash
-# Install with AI support (anthropic package included)
 pip install loenn-mcp
-
-# Set your API key (get from https://console.anthropic.com/)
-$env:ANTHROPIC_API_KEY="sk-ant-api03-..."
+export ANTHROPIC_API_KEY="sk-ant-..."  # Get from https://console.anthropic.com/
 ```
 
-**Available Tools:**
+### Available Tools
 
 | Tool | Description |
 |---|---|
-| `ai_analyze_map` | Claude-powered design feedback (general/difficulty/visual/flow analysis) |
-| `ai_describe_room` | Generate narrative descriptions of rooms in various styles |
-| `ai_suggest_entities` | Get specific entity placement recommendations with coordinates |
+| `ai_analyze_map` | Design feedback (general/difficulty/visual/flow) |
+| `ai_describe_room` | Generate room descriptions in various styles |
+| `ai_suggest_entities` | Entity placement recommendations with coordinates |
 
-**Example prompts:**
+### Examples
 
 ```python
-# Get AI feedback on your map design
+# Get design feedback
 ai_analyze_map(map_path="Maps/MyMod/1-City.bin", analysis_type="general")
-# → "Strengths: Good checkpoint distribution. Suggestions: Add more strawberries in rooms 3-5..."
+# → "Strengths: Good checkpoints. Add more strawberries in rooms 3-5..."
 
-# Generate atmospheric room descriptions
+# Generate descriptions
 ai_describe_room(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", style="atmospheric")
 # → "A windswept precipice where ancient stone meets howling gales..."
 
-# Get entity placement suggestions
+# Get entity suggestions
 ai_suggest_entities(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", goal="add_challenge")
-# → "1. Add spikes at (120, 80) for a timing challenge..."
+# → "1. Add spikes at (120, 80) for timing challenge..."
 ```
 
-**Analysis Types:**
-- `general` — Overall design assessment with improvement suggestions
-- `difficulty` — Difficulty curve and balancing analysis
-- `visual` — Visual variety and theme consistency feedback
-- `flow` — Player movement flow and navigation clarity
+### Analysis Types
+- `general` — Overall design with suggestions
+- `difficulty` — Difficulty curve analysis
+- `visual` — Visual variety and theme feedback
+- `flow` — Player movement and navigation
 
-**Description Styles:**
-- `atmospheric` — Evocative, mood-focused descriptions
-- `technical` — Gameplay-focused descriptions
-- `story` — Narrative/story snippets
-- `brief` — Concise 1-2 sentence summaries
+### Description Styles
+- `atmospheric` — Evocative, mood-focused
+- `technical` — Gameplay-focused
+- `story` — Narrative snippets
+- `brief` — 1-2 sentence summaries
 
-**Suggestion Goals:**
-- `improve_flow` — Better player guidance and navigation
+### Suggestion Goals
+- `improve_flow` — Better player guidance
 - `add_challenge` — Skill-testing elements
-- `reduce_difficulty` — Accessibility improvements
+- `reduce_difficulty` — Accessibility
 - `add_secrets` — Exploration rewards
 
-The AI tools gracefully degrade if `ANTHROPIC_API_KEY` is not set, returning helpful error messages.
+Gracefully degrades if `ANTHROPIC_API_KEY` is not set.
 
 ---
 
-## PCGHelper Tools (NEW in v5.2)
+## Advanced PCG (MdMC/WFC)
 
-Full Python port of the [PCGHelper Lönn mod](https://github.com/Maggy-Studio/PCGHelper) — MdMC/WFC tile generation, skeleton layout, and end-to-end PCG pipeline, all accessible as MCP tools.
+Full Python port of [PCGHelper Lönn mod](https://github.com/Maggy-Studio/PCGHelper) — MdMC/WFC tile generation, skeleton layout, and end-to-end pipeline.
+
+### Tools
 
 | Tool | Description |
 |---|---|
-| `pcg_mdmc_presets` | List all 7 MdMC configuration matrix presets with descriptions |
-| `pcg_skeleton_generate` | Lay out a non-overlapping room skeleton connected edge-to-edge |
-| `pcg_markov_fill` | Fill rooms with tiles using MdMC, WFC, or hybrid mode |
-| `pcg_score_room` | Evaluate a room's interestingness I and difficulty D (paper §4.2/§4.3) |
-| `pcg_pipeline` | One-shot end-to-end generation: skeleton → tile fill → repair → entities |
+| `pcg_mdmc_presets` | List 7 MdMC configuration presets |
+| `pcg_skeleton_generate` | Layout non-overlapping room skeleton |
+| `pcg_markov_fill` | Fill rooms with MdMC/WFC/hybrid |
+| `pcg_score_room` | Evaluate interestingness & difficulty |
+| `pcg_pipeline` | One-shot end-to-end generation |
 
-**Generation modes:** `mdmc` (Multi-dimensional Markov Chain), `wfc` (Wave Function Collapse), `hybrid`
+### Generation Modes
+- `mdmc` — Multi-dimensional Markov Chain
+- `wfc` — Wave Function Collapse
+- `hybrid` — Combination of both
 
-**Scoring metrics** (paper §4.2/§4.3):
-- **Interestingness I** = w1·global_NLE_density + w2·local_NLE_density + w3·Shannon_entropy
-- **Difficulty D** = z1·hole_frequency + z2·local_LE_density + z3·NLE_scarcity
+### Scoring Metrics
 
-**MdMC configuration matrix presets:**
+**Interestingness I** = w1·global_NLE + w2·local_NLE + w3·Shannon_entropy
+
+**Difficulty D** = z1·hole_frequency + z2·local_LE + z3·NLE_scarcity
+
+### MdMC Presets
 
 | Key | Description |
 |---|---|
-| `000011012` | E+S — L-shape (paper default) |
-| `000011112` | E+SW+S — 3-neighbour causal |
-| `001001112` | NE+E+SW+S — 4-neighbour (paper) |
-| `011011012` | N+NE+W+E+S — 5-neighbour |
-| `010111010` | N+W+E+S — cross (recommended for WFC) |
-| `101000101` | NW+NE+SW+SE — diagonals only |
-| `111101111` | All 8 neighbours — full context |
+| `000011012` | L-shape (default) |
+| `000011112` | 3-neighbour causal |
+| `001001112` | 4-neighbour |
+| `011011012` | 5-neighbour |
+| `010111010` | Cross (WFC recommended) |
+| `101000101` | Diagonals only |
+| `111101111` | All 8 neighbours |
 
-**Example — one-shot pipeline:**
+### Example
 
 ```python
-# Generate 8 connected rooms trained on existing map rooms
+# One-shot end-to-end generation
 pcg_pipeline(
     map_path="Maps/MyMod/1-City.bin",
     room_count=8,
-    room_width_tiles=40,
-    room_height_tiles=23,
     generation_mode="mdmc",
     seed=42,
-    carve_exits=True,
     ensure_playable=True,
     place_entities=True,
-    name_prefix="gen_",
 )
-# → "PCG pipeline complete: 8 rooms added — gen_0 … gen_7"
+# → "PCG pipeline complete: 8 rooms added"
 
-# Score an existing room
+# Score a room
 pcg_score_room(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03")
 # → "Interestingness I = 0.4231 | Difficulty D = 0.5812"
 
-# Just fill tiles in existing empty rooms
+# Fill existing empty rooms
 pcg_markov_fill(
     map_path="Maps/MyMod/1-City.bin",
     room_names="skel_0,skel_1,skel_2",
@@ -593,78 +481,66 @@ pcg_markov_fill(
 
 ---
 
-## Environment Variables
+## Configuration
 
 | Variable | Default | Description |
 |---|---|---|
-| `LOENN_MCP_WORKSPACE` | Current working directory | Root of your Celeste mod project. The server resolves all map paths relative to this. Path traversal outside the workspace is blocked. |
+| `LOENN_MCP_WORKSPACE` | Current directory | Root of your Celeste mod project. All map paths are relative to this. Path traversal is blocked. |
 
 ---
 
-## How It Works
+## Architecture
 
-### `celeste_bin.py` — standalone binary parser
+### Core Modules
 
-A pure-Python implementation of the Celeste `.bin` map format (no Everest or Lönn required):
-
+**`celeste_bin.py`** — Standalone `.bin` parser
+- Pure Python (no Everest/Lönn required)
 - Full read/write round-trip with no data loss
-- Handles all 7 value types: `bool`, `uint8`, `int16`, `int32`, `float32`, lookup string, raw string, RLE-encoded string
-- Recursive element tree matching the internal Lönn/Maple format
+- Handles all 7 value types: bool, uint8, int16, int32, float32, lookup string, raw string, RLE-encoded string
+- Recursive element tree matching Lönn/Maple format
 
-### `pcg.py` — procedural generation module
+**`pcg.py`** — Procedural generation
+- Pattern extraction from rooms (size, entity density, tile motifs, gameplay tags)
+- JSON pattern library with deduplication
+- Strategy-based generation (balanced, exploration, challenge, speedrun)
+- Seeded randomness for reproducible output
+- Model profiles (deterministic, creative, architect)
 
-Provides:
+**`image_map.py`** — Image-to-map conversion
+- Color-to-role mapping (configurable palette)
+- Automatic room splitting
+- Entity placement from pixel colors
+- Scale support (downscaling)
+- Fuzzy color matching
 
-- **Pattern extraction** — converts `.bin` rooms into reusable pattern records (size class, entity density, tile motifs, trigger usage, gameplay tags)
-- **Pattern library** — JSON-based store with deduplication by content hash
-- **Strategy-based generation** — `balanced`, `exploration`, `challenge`, `speedrun` modes
-- **Seeded randomness** — `random.Random(seed)` for reproducible outputs; seed exposed via MCP tool parameters
-- **Model profiles** — `deterministic` / `creative` / `architect` profiles control how seeds are resolved
+**`terrain_gen.py`** — Seeded terrain generation
+- Perlin noise with fractal octaves
+- Voronoi biome partitioning
+- Fully seeded (same seed = identical output)
+- Difficulty scaling (1-5)
+- Biome-aware entities
 
-### `image_map.py` — image-to-map conversion (NEW in v4)
+**`gdep_tools.py`** — Game analysis
+- Wiki caching (`.loenn_mcp_wiki/`)
+- Pattern detection (linear, hub, collectible-rich, etc.)
+- Difficulty analysis (1-10 scale)
+- Room connectivity graphs
+- Map diffing with snapshots
+- Batch validation and auto-fix
+- Actionable suggestions
 
-Converts color-mapped images into playable Celeste maps:
+**`ai_analyzer.py`** — AI-powered analysis
+- Claude API integration
+- Design feedback (general, difficulty, visual, flow)
+- Room descriptions (atmospheric, technical, story, brief)
+- Entity placement suggestions
+- Graceful degradation
 
-- **Color-to-role mapping** — configurable palette mapping colors to tiles and entities
-- **Automatic room splitting** — large images are divided into room-sized chunks
-- **Entity placement** — spawns, hazards, collectibles extracted directly from pixel colors
-- **Scale support** — large images can be downscaled (N×N pixel blocks → 1 tile)
-- **Tolerance matching** — fuzzy color matching for hand-drawn or anti-aliased images
-
-### `terrain_gen.py` — seeded terrain generator (NEW in v4)
-
-Procedural map generation inspired by [AliShazly/map-generator](https://github.com/AliShazly/map-generator):
-
-- **Perlin noise** — pure-Python implementation with fractal octaves for organic terrain
-- **Voronoi biomes** — map partitioned into distinct biome regions (mountain, forest, plains, lake, cave, summit)
-- **Fully seeded** — same seed + parameters = identical output every time
-- **Difficulty scaling** — 1-5 scale controls hazard density, tile coverage, and platform frequency
-- **Biome-aware entities** — each biome has appropriate hazards, collectibles, and room flags
-
-### `gdep_tools.py` — game analysis tools (NEW in v5)
-
-Integrates game analysis concepts from [pirua-game/ai_game_base_analysis_cli_mcp_tool](https://github.com/pirua-game/ai_game_base_analysis_cli_mcp_tool) (gdep):
-
-- **Wiki caching** — persist analysis results locally so repeated queries are instant (`.loenn_mcp_wiki/`)
-- **Pattern detection** — detect gameplay design archetypes (linear progression, hub layouts, collectible-rich, wind corridors)
-- **Difficulty analysis** — estimate room/map difficulty from hazard density, navigation aids, tile coverage (1-10 scale)
-- **Room connectivity** — adjacency graph analysis showing isolated rooms, dead ends, and hubs
-- **Map diffing** — snapshot-based structural diffing for tracking map evolution over time
-- **Batch validation** — whole-map playability checks (spawns, floors, bounds) with optional auto-fix
-- **Suggestions** — actionable improvement suggestions based on room analysis
-
-### `ai_analyzer.py` — AI-powered analysis (NEW)
-
-Integrates Anthropic's Claude API for intelligent map design assistance:
-
-- **Map analysis** — AI-powered feedback on design, difficulty, visuals, and flow
-- **Room descriptions** — Generate narrative descriptions in atmospheric, technical, story, or brief styles
-- **Entity suggestions** — Get specific entity placement recommendations with coordinates
-- **Graceful degradation** — Helpful error messages when `ANTHROPIC_API_KEY` is not configured
-
-### `server.py` — MCP server
-
-Built with [FastMCP](https://github.com/jlowin/fastmcp). All file paths are resolved relative to `LOENN_MCP_WORKSPACE` with path-traversal protection. Map writes are atomic (parse → mutate → write). External downloads require explicit `confirm_download=True`.
+**`server.py`** — MCP server
+- Built with [FastMCP](https://github.com/jlowin/fastmcp)
+- Path-traversal protection
+- Atomic map writes
+- Explicit download confirmation
 
 ---
 
@@ -672,12 +548,15 @@ Built with [FastMCP](https://github.com/jlowin/fastmcp). All file paths are reso
 
 - Python 3.9+
 - `fastmcp >= 3.0.0`
-- `anthropic >= 0.40.0` (optional — only needed for AI-powered tools)
-- `Pillow >= 9.0` (optional — only needed for `generate_map_from_image`)
+- `anthropic >= 0.40.0` (optional, for AI-powered tools)
+- `Pillow >= 9.0` (optional, for image-to-map conversion)
 
-Install with all optional features: `pip install loenn-mcp[image]`
+Install with all optional features:
+```bash
+pip install loenn-mcp[image]
+```
 
-No Celeste installation required to parse, generate, or preview maps.
+No Celeste installation required.
 
 ---
 

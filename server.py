@@ -1,16 +1,22 @@
 """
 Lönn MCP Server — Celeste Map Editor for AI Agents
 
-Provides tools for reading, editing, analyzing, and generating Celeste map
-files (.bin) directly from VS Code via the Model Context Protocol.
+Provides comprehensive tools for reading, editing, analyzing, and generating
+Celeste map files (.bin) directly from VS Code via the Model Context Protocol.
 
 Tools:
-  Map Reading:    list_maps, read_map_overview, read_room, get_room_tiles
-  Map Editing:    add_entity, remove_entity, set_room_tiles, add_room,
-                  remove_room, create_map
-  Entity Catalog: list_entity_definitions, get_entity_definition,
-                  list_trigger_definitions
-  Analysis:       analyze_map, visualize_map_layout
+  Map Reading:      list_maps, read_map_overview, read_room, get_room_tiles
+  Map Editing:      add_entity, remove_entity, set_room_tiles, add_room,
+                    remove_room, create_map
+  Room Settings:    get_room_settings, update_room_settings
+  Map Metadata:     get_map_metadata, set_map_metadata
+  Decals:           list_decals, add_decal, remove_decal
+  Stylegrounds:     list_stylegrounds, add_styleground, update_styleground,
+                    remove_styleground
+  Triggers:         add_trigger, remove_trigger
+  Entity Catalog:   list_entity_definitions, get_entity_definition,
+                    list_trigger_definitions, list_effect_definitions
+  Analysis:         analyze_map, visualize_map_layout, preview_map_section
 
 Usage:
   python server.py                         (uses cwd as workspace)
@@ -1610,6 +1616,654 @@ drawMMViewport();
     return f"Preview saved to: {output_file}\nOpen this file in a browser to see the map.\nRooms shown: {len(rooms)}"
 
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ROOM SETTINGS & METADATA TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def get_room_settings(map_path: str, room_name: str) -> str:
+    """Get all editable settings for a room (music, physics, wind, camera, flags).
+
+    Returns all metadata properties including music tracks, physics flags
+    (dark/space/underwater), wind pattern, camera offsets, and music layers.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name (with or without 'lvl_' prefix)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    lines = [f"=== Room Settings: {room.get('name')} ===\n"]
+
+    # Audio settings
+    lines.append("Audio:")
+    lines.append(f"  music: {room.get('music', '')!r}")
+    lines.append(f"  alt_music: {room.get('alt_music', '')!r}")
+    lines.append(f"  ambience: {room.get('ambience', '')!r}")
+    lines.append(f"  delayAltMusicFade: {room.get('delayAltMusicFade', False)}")
+
+    # Physics flags
+    lines.append("\nPhysics:")
+    lines.append(f"  dark: {room.get('dark', False)}")
+    lines.append(f"  space: {room.get('space', False)}")
+    lines.append(f"  underwater: {room.get('underwater', False)}")
+    lines.append(f"  whisper: {room.get('whisper', False)}")
+
+    # Wind and environment
+    lines.append("\nEnvironment:")
+    lines.append(f"  windPattern: {room.get('windPattern', 'None')}")
+    lines.append(f"  disableDownTransition: {room.get('disableDownTransition', False)}")
+
+    # Camera
+    lines.append("\nCamera:")
+    lines.append(f"  cameraOffsetX: {room.get('cameraOffsetX', 0)}")
+    lines.append(f"  cameraOffsetY: {room.get('cameraOffsetY', 0)}")
+
+    # Music layers
+    lines.append("\nMusic Layers:")
+    for i in range(1, 5):
+        key = f"musicLayer{i}"
+        lines.append(f"  layer{i}: {room.get(key, True)}")
+
+    # Progress tracking
+    lines.append("\nProgress:")
+    lines.append(f"  musicProgress: {room.get('musicProgress', '')!r}")
+    lines.append(f"  ambienceProgress: {room.get('ambienceProgress', '')!r}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def update_room_settings(
+    map_path: str,
+    room_name: str,
+    settings: str,
+) -> str:
+    """Update room-level properties (music, dark, wind, etc.).
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name (with or without lvl_ prefix)
+        settings: JSON object of properties to update.
+                 Example: '{"dark": true, "windPattern": "Left"}'
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    try:
+        props = json.loads(settings)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {settings}"
+
+    # Protect structural keys
+    _protected = frozenset(("__name", "__children", "name", "x", "y", "width", "height"))
+    updated = []
+
+    for key, value in props.items():
+        if key not in _protected:
+            room[key] = value
+            updated.append(f"{key}={value}")
+
+    if not updated:
+        return "No valid properties to update."
+
+    cb.write_map(path, data)
+    return f"Updated room '{room_name}': {', '.join(updated)}"
+
+
+@mcp.tool()
+def get_map_metadata(map_path: str) -> str:
+    """Read the map-level metadata block (Everest/celeste.yaml meta settings).
+
+    Returns the meta node that stores settings like wipe type, intro type,
+    heart texture, cassette song, and other map-wide overrides.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    lines = [f"=== Map Metadata: {data.get('_package', '?')} ===\n"]
+
+    # Package and basic info
+    lines.append(f"Package: {data.get('_package', '?')}")
+
+    # Look for meta node
+    meta = cb.find_child(data, "meta")
+    if meta:
+        lines.append("\nMeta properties:")
+        for key, value in meta.items():
+            if not key.startswith("__"):
+                lines.append(f"  {key}: {value!r}")
+    else:
+        lines.append("\nNo meta node found (using defaults).")
+
+    # Look for Filler (Everest metadata)
+    filler = cb.find_child(data, "Filler")
+    if filler:
+        lines.append("\nFiller/Everest metadata:")
+        for key, value in filler.items():
+            if not key.startswith("__"):
+                lines.append(f"  {key}: {value!r}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def set_map_metadata(map_path: str, settings: str) -> str:
+    """Set map-level metadata properties (Everest meta block).
+
+    These properties control map-wide behaviour like wipe type, mountain
+    colours, intro cutscene, heart/cassette song overrides, etc.
+
+    Args:
+        map_path: Path to the .bin file
+        settings: JSON object of meta key/value pairs to set,
+                 e.g. '{"Wipe": "Mountain", "Dreaming": true}'
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    try:
+        props = json.loads(settings)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {settings}"
+
+    # Find or create meta node
+    meta = cb.find_child(data, "meta")
+    if meta is None:
+        meta = {"__name": "meta", "__children": []}
+        data["__children"].append(meta)
+
+    updated = []
+    for key, value in props.items():
+        if not key.startswith("__"):
+            meta[key] = value
+            updated.append(f"{key}={value}")
+
+    if not updated:
+        return "No valid properties to update."
+
+    cb.write_map(path, data)
+    return f"Updated map metadata: {', '.join(updated)}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DECAL MANAGEMENT TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def list_decals(map_path: str, room_name: str, layer: str = "fg") -> str:
+    """List all decals in a room (foreground or background).
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        layer: "fg" for foreground decals, "bg" for background decals
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    layer_name = "fgdecals" if layer == "fg" else "bgdecals"
+    dec_el = cb.find_child(room, layer_name)
+
+    if dec_el is None or not dec_el.get("__children"):
+        return f"No {layer} decals in this room."
+
+    decs = dec_el.get("__children", [])
+    lines = [f"=== {layer_name} ({len(decs)} decals) ===\n"]
+
+    for i, d in enumerate(decs):
+        texture = d.get("texture", "?")
+        x, y = d.get("x", 0), d.get("y", 0)
+        sx, sy = d.get("scaleX", 1), d.get("scaleY", 1)
+        lines.append(f"[{i}] {texture} @ ({x},{y}) scale=({sx},{sy})")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_decal(
+    map_path: str,
+    room_name: str,
+    texture: str,
+    x: int,
+    y: int,
+    layer: str = "fg",
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+) -> str:
+    """Add a decal to a room.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Target room
+        texture: Decal texture path (e.g. "decals/1-forsakencity/flag_a00")
+        x: X position
+        y: Y position
+        layer: "fg" or "bg"
+        scale_x: Horizontal scale (default 1.0)
+        scale_y: Vertical scale (default 1.0)
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    layer_name = "fgdecals" if layer == "fg" else "bgdecals"
+    dec_el = cb.find_child(room, layer_name)
+
+    if dec_el is None:
+        dec_el = {"__name": layer_name, "__children": []}
+        room["__children"].append(dec_el)
+
+    decal = {
+        "__name": "decal",
+        "__children": [],
+        "texture": texture,
+        "x": x,
+        "y": y,
+        "scaleX": scale_x,
+        "scaleY": scale_y,
+    }
+
+    dec_el["__children"].append(decal)
+    cb.write_map(path, data)
+
+    return f"Added decal '{texture}' at ({x},{y}) to {layer_name}."
+
+
+@mcp.tool()
+def remove_decal(map_path: str, room_name: str, index: int, layer: str = "fg") -> str:
+    """Remove a decal by index.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        index: Decal index (from list_decals output)
+        layer: "fg" or "bg"
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    layer_name = "fgdecals" if layer == "fg" else "bgdecals"
+    dec_el = cb.find_child(room, layer_name)
+
+    if dec_el is None:
+        return f"No {layer} decals in this room."
+
+    children = dec_el.get("__children", [])
+    if index < 0 or index >= len(children):
+        return f"Invalid decal index: {index} (range: 0-{len(children)-1})"
+
+    removed = children.pop(index)
+    cb.write_map(path, data)
+
+    return f"Removed decal '{removed.get('texture', '?')}' from {layer_name}."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STYLEGROUND TOOLS (Map Effects)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def list_stylegrounds(map_path: str) -> str:
+    """List all stylegrounds (foreground + background effects) in a map.
+
+    Stylegrounds live under Style/Foregrounds and Style/Backgrounds. Each
+    entry is shown with its top-level index (used by remove_styleground /
+    update_styleground), the effect type, and a few key attributes. Children
+    of `apply` group elements are listed indented underneath their group.
+
+    Args:
+        map_path: Path to the .bin file
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    style = cb.find_child(data, "Style")
+    if style is None:
+        return "No Style node found in map."
+
+    lines = ["=== Stylegrounds ===\n"]
+
+    for layer_name in ("Foregrounds", "Backgrounds"):
+        layer = cb.find_child(style, layer_name)
+        if layer is None:
+            continue
+
+        effects = layer.get("__children", [])
+        lines.append(f"{layer_name} ({len(effects)} effects):")
+
+        for i, effect in enumerate(effects):
+            ename = effect.get("__name", "?")
+            lines.append(f"  [{i}] {ename}")
+
+            # Show key properties
+            for key in ("texture", "only", "speed", "effect"):
+                if key in effect:
+                    lines.append(f"      {key}: {effect[key]!r}")
+
+            # Show children if apply group
+            if ename == "apply":
+                children = effect.get("__children", [])
+                for j, child in enumerate(children):
+                    cname = child.get("__name", "?")
+                    lines.append(f"        [{j}] {cname}")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def add_styleground(
+    map_path: str,
+    effect_name: str,
+    layer: str = "bg",
+    index: int = -1,
+    properties: str = "{}",
+) -> str:
+    """Add a styleground effect to a map.
+
+    Stylegrounds are layered visual effects (parallax backgrounds, custom
+    Lua effects like 2.5DHelper/VoidBg, snow/dust overlays, etc.) rendered
+    behind or in front of every room. They live under Style/Foregrounds or
+    Style/Backgrounds — auto-created if missing.
+
+    Args:
+        map_path: Path to the .bin file
+        effect_name: Effect type (e.g. "parallax", "2.5DHelper/VoidBg",
+                    "WhiteholeBg", "apply" for a group element)
+        layer: "bg" / "background" / "backgrounds" (default), or "fg" /
+               "foreground" / "foregrounds"
+        index: Position to insert at (-1 appends to the end)
+        properties: JSON object of effect properties
+                   (e.g. '{"texture": "bgs/01/bg", "only": "lvl_a-01"}')
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    # Normalize layer name
+    if layer.lower() in ("fg", "foreground", "foregrounds"):
+        layer_name = "Foregrounds"
+    else:
+        layer_name = "Backgrounds"
+
+    # Find or create Style node
+    style = cb.find_child(data, "Style")
+    if style is None:
+        style = {"__name": "Style", "__children": []}
+        data["__children"].append(style)
+
+    # Find or create layer
+    layer_el = cb.find_child(style, layer_name)
+    if layer_el is None:
+        layer_el = {"__name": layer_name, "__children": []}
+        style["__children"].append(layer_el)
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON properties: {properties}"
+
+    effect = {
+        "__name": effect_name,
+        "__children": [],
+    }
+    effect.update(props)
+
+    children = layer_el.get("__children", [])
+    if index < 0 or index >= len(children):
+        children.append(effect)
+    else:
+        children.insert(index, effect)
+
+    cb.write_map(path, data)
+    return f"Added styleground '{effect_name}' to {layer_name}."
+
+
+@mcp.tool()
+def update_styleground(
+    map_path: str,
+    layer: str,
+    index: int,
+    properties: str,
+) -> str:
+    """Update properties of a styleground by index.
+
+    Merge properties into an existing styleground without replacing it.
+    Existing keys in `properties` overwrite the styleground's values; keys
+    not present in `properties` are left unchanged. To clear a key, pass
+    its value as null.
+
+    Args:
+        map_path: Path to the .bin file
+        layer: "fg"/"foregrounds" or "bg"/"backgrounds"
+        index: 0-based index of the styleground in that layer
+        properties: JSON object of properties to merge in
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    # Normalize layer name
+    if layer.lower() in ("fg", "foreground", "foregrounds"):
+        layer_name = "Foregrounds"
+    else:
+        layer_name = "Backgrounds"
+
+    style = cb.find_child(data, "Style")
+    if style is None:
+        return "No Style node in map."
+
+    layer_el = cb.find_child(style, layer_name)
+    if layer_el is None:
+        return f"No {layer_name} in Style."
+
+    children = layer_el.get("__children", [])
+    if index < 0 or index >= len(children):
+        return f"Invalid styleground index: {index} (range: 0-{len(children)-1})"
+
+    try:
+        props = json.loads(properties)
+    except json.JSONDecodeError:
+        return f"Invalid JSON: {properties}"
+
+    effect = children[index]
+    updated = []
+
+    for key, value in props.items():
+        if not key.startswith("__"):
+            if value is None:
+                effect.pop(key, None)
+                updated.append(f"{key}=null")
+            else:
+                effect[key] = value
+                updated.append(f"{key}={value}")
+
+    if not updated:
+        return "No valid properties to update."
+
+    cb.write_map(path, data)
+    return f"Updated styleground [{index}] in {layer_name}: {', '.join(updated)}"
+
+
+@mcp.tool()
+def remove_styleground(map_path: str, layer: str, index: int) -> str:
+    """Remove a styleground from a map by its index in the layer.
+
+    Use list_stylegrounds first to see the current indices.
+
+    Args:
+        map_path: Path to the .bin file
+        layer: "fg"/"foregrounds" or "bg"/"backgrounds"
+        index: 0-based index of the styleground in that layer
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+
+    # Normalize layer name
+    if layer.lower() in ("fg", "foreground", "foregrounds"):
+        layer_name = "Foregrounds"
+    else:
+        layer_name = "Backgrounds"
+
+    style = cb.find_child(data, "Style")
+    if style is None:
+        return "No Style node in map."
+
+    layer_el = cb.find_child(style, layer_name)
+    if layer_el is None:
+        return f"No {layer_name} in Style."
+
+    children = layer_el.get("__children", [])
+    if index < 0 or index >= len(children):
+        return f"Invalid styleground index: {index} (range: 0-{len(children)-1})"
+
+    removed = children.pop(index)
+    cb.write_map(path, data)
+
+    return f"Removed styleground '{removed.get('__name', '?')}' from {layer_name}."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TRIGGER MANAGEMENT TOOLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@mcp.tool()
+def add_trigger(
+    map_path: str,
+    room_name: str,
+    trigger_name: str,
+    x: int,
+    y: int,
+    width: int = 16,
+    height: int = 16,
+    trigger_id: int = -1,
+    properties: str = "{}",
+    nodes: str = "[]",
+) -> str:
+    """Add a trigger to a room and save the map.
+
+    Triggers are rectangular regions that fire effects when the player enters
+    them (dialog, camera moves, music changes, flag toggles, etc.). Trigger
+    IDs are auto-assigned to be unique across both entities and triggers in
+    the room.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        trigger_name: Trigger type (e.g. "everest/dialogTrigger",
+                     "2.5DHelper/StarterFlagTrigger")
+        x: X position in pixels
+        y: Y position in pixels
+        width: Trigger width in pixels (default 16)
+        height: Trigger height in pixels (default 16)
+        trigger_id: Trigger ID (-1 to auto-assign)
+        properties: JSON object string of extra properties
+                   (e.g. '{"dialog_id": "MAP_INTRO"}')
+        nodes: JSON array of {\"x\": int, \"y\": int} objects for triggers that
+               need path/target nodes (e.g. cameraTargetTrigger). Default "[]"
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    trig_el = cb.find_child(room, "triggers")
+    if trig_el is None:
+        trig_el = {"__name": "triggers", "__children": []}
+        room["__children"].append(trig_el)
+
+    if trigger_id < 0:
+        trigger_id = _next_entity_id(room)
+
+    try:
+        props = json.loads(properties)
+        node_list = json.loads(nodes)
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+    trigger: dict = {
+        "__name": trigger_name,
+        "__children": [],
+        "id": trigger_id,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+    }
+
+    # Add nodes if provided
+    if node_list:
+        trigger["__children"] = [
+            {"__name": "node", "x": n.get("x", 0), "y": n.get("y", 0)}
+            for n in node_list
+        ]
+
+    # Guard: never let user-supplied props overwrite structural keys
+    _protected = frozenset(("__name", "__children", "id", "x", "y", "width", "height"))
+    trigger.update({k: v for k, v in props.items() if k not in _protected})
+
+    trig_el["__children"].append(trigger)
+    cb.write_map(path, data)
+
+    return f"Added trigger '{trigger_name}' (id={trigger_id}) at ({x},{y}) to '{room_name}'."
+
+
+@mcp.tool()
+def remove_trigger(map_path: str, room_name: str, trigger_id: int) -> str:
+    """Remove a trigger from a room by its ID.
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name
+        trigger_id: Trigger ID to remove
+    """
+    path = _resolve(map_path)
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+
+    if room is None:
+        return f"Room '{room_name}' not found."
+
+    trig_el = cb.find_child(room, "triggers")
+    if trig_el is None:
+        return "No triggers in this room."
+
+    children = trig_el.get("__children", [])
+    before = len(children)
+    trig_el["__children"] = [t for t in children if t.get("id") != trigger_id]
+
+    if len(trig_el["__children"]) == before:
+        return f"Trigger id={trigger_id} not found."
+
+    cb.write_map(path, data)
+    return f"Removed trigger id={trigger_id} from '{room_name}'."
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
