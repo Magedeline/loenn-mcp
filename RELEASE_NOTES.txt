@@ -1,3 +1,63 @@
+loenn-mcp v5.2.0
+================
+
+PCGHelper integration — full Python port of the PCGHelper Lönn mod algorithms
+for MdMC/WFC tile generation, skeleton layout, and the end-to-end PCG pipeline.
+
+
+WHAT'S NEW IN v5.2.0
+--------------------
+
+5 new MCP tools (87 tools total):
+
+  pcg_mdmc_presets        — list all 7 MdMC configuration matrix presets with
+                            descriptions (L-shape, 4-neighbour, cross, full, …)
+
+  pcg_skeleton_generate   — lay out a non-overlapping room skeleton connected
+                            edge-to-edge (ported from CelesteSkeletonScript).
+                            First room = START (player spawn), furthest room =
+                            END (golden berry). Writes empty bordered rooms to
+                            an existing .bin file. Run pcg_markov_fill next to
+                            fill the tiles.
+
+  pcg_markov_fill         — fill rooms with tiles using MdMC, WFC, or hybrid
+                            mode (ported from MarkovLevelGenScript).
+                            Supports: tile-level backtracking, cleanup passes,
+                            auto-tiling, BG generation, playability repair,
+                            interestingness/difficulty gating, entity placement,
+                            smart decal & trigger placement.
+
+  pcg_score_room          — evaluate a room's interestingness I and difficulty D
+                            using the paper §4.2/§4.3 metrics:
+                              I = w1·global_NLE + w2·local_NLE + w3·entropy
+                              D = z1·hole_freq  + z2·local_LE  + z3·NLE_scarcity
+
+  pcg_pipeline            — end-to-end one-shot generator (ported from
+                            CelestePCGPipelineScript): skeleton layout → MdMC/
+                            WFC/hybrid tile fill → cleanup → playability repair
+                            → entity/decal/trigger placement → exit carving.
+                            All parameters are tunable.
+
+New module: loenn_mcp/pcg_helper.py
+  - LcgRng: 32-bit LCG RNG mirroring Lua / C# System.Random subset
+  - parse_config: 9-char MdMC matrix parser (7 built-in presets)
+  - train_mdmc / mdmc_generate: MdMC with tile-level backtracking
+  - train_adjacency / wfc_generate: WFC with entropy-based cell selection
+  - generate_skeleton: non-overlapping room layout with adjacency graph
+  - carve_exits: 3-tile-wide doorways between adjacent rooms
+  - platformer_repair: BFS reachability + corridor carving
+  - score_interestingness / score_difficulty: paper §4.2 / §4.3 metrics
+  - generate_pattern_room: marioGen-v2 pattern-mode generation
+  - place_entities / place_decals / place_triggers: smart spatial placement
+  - run_pipeline: full end-to-end generation pipeline
+
+No new runtime dependencies — stdlib only.
+
+Source mod: PCGHelper (D:/Celeste/celeste/Mods/PCGHelper)
+  Lua scripts by the PCGHelper mod author, ported to Python for MCP use.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 loenn-mcp v5.1.0
 ================
 

@@ -12,7 +12,7 @@ Built for use with [Everest](https://github.com/EverestAPI/Everest) mods. Works 
 
 ## Features
 
-### 60 MCP tools across 18 categories
+### 87 MCP tools across 19 categories
 
 **Map Reading**
 | Tool | Description |
@@ -526,6 +526,70 @@ ai_suggest_entities(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", goal
 - `add_secrets` — Exploration rewards
 
 The AI tools gracefully degrade if `ANTHROPIC_API_KEY` is not set, returning helpful error messages.
+
+---
+
+## PCGHelper Tools (NEW in v5.2)
+
+Full Python port of the [PCGHelper Lönn mod](https://github.com/Maggy-Studio/PCGHelper) — MdMC/WFC tile generation, skeleton layout, and end-to-end PCG pipeline, all accessible as MCP tools.
+
+| Tool | Description |
+|---|---|
+| `pcg_mdmc_presets` | List all 7 MdMC configuration matrix presets with descriptions |
+| `pcg_skeleton_generate` | Lay out a non-overlapping room skeleton connected edge-to-edge |
+| `pcg_markov_fill` | Fill rooms with tiles using MdMC, WFC, or hybrid mode |
+| `pcg_score_room` | Evaluate a room's interestingness I and difficulty D (paper §4.2/§4.3) |
+| `pcg_pipeline` | One-shot end-to-end generation: skeleton → tile fill → repair → entities |
+
+**Generation modes:** `mdmc` (Multi-dimensional Markov Chain), `wfc` (Wave Function Collapse), `hybrid`
+
+**Scoring metrics** (paper §4.2/§4.3):
+- **Interestingness I** = w1·global_NLE_density + w2·local_NLE_density + w3·Shannon_entropy
+- **Difficulty D** = z1·hole_frequency + z2·local_LE_density + z3·NLE_scarcity
+
+**MdMC configuration matrix presets:**
+
+| Key | Description |
+|---|---|
+| `000011012` | E+S — L-shape (paper default) |
+| `000011112` | E+SW+S — 3-neighbour causal |
+| `001001112` | NE+E+SW+S — 4-neighbour (paper) |
+| `011011012` | N+NE+W+E+S — 5-neighbour |
+| `010111010` | N+W+E+S — cross (recommended for WFC) |
+| `101000101` | NW+NE+SW+SE — diagonals only |
+| `111101111` | All 8 neighbours — full context |
+
+**Example — one-shot pipeline:**
+
+```python
+# Generate 8 connected rooms trained on existing map rooms
+pcg_pipeline(
+    map_path="Maps/MyMod/1-City.bin",
+    room_count=8,
+    room_width_tiles=40,
+    room_height_tiles=23,
+    generation_mode="mdmc",
+    seed=42,
+    carve_exits=True,
+    ensure_playable=True,
+    place_entities=True,
+    name_prefix="gen_",
+)
+# → "PCG pipeline complete: 8 rooms added — gen_0 … gen_7"
+
+# Score an existing room
+pcg_score_room(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03")
+# → "Interestingness I = 0.4231 | Difficulty D = 0.5812"
+
+# Just fill tiles in existing empty rooms
+pcg_markov_fill(
+    map_path="Maps/MyMod/1-City.bin",
+    room_names="skel_0,skel_1,skel_2",
+    generation_mode="wfc",
+    configuration="010111010",
+    seed=99,
+)
+```
 
 ---
 

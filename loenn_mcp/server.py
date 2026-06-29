@@ -36,6 +36,8 @@ Tools (categories):
                     preview_terrain_biomes
   AI Analysis:      ai_analyze_map, ai_describe_room, ai_suggest_entities (Claude API)
   Lönn Manager:     install_loenn_manager, get_loenn_manager_source
+  PCGHelper:        pcg_mdmc_presets, pcg_skeleton_generate, pcg_markov_fill,
+                    pcg_score_room, pcg_pipeline
 
 AI-Powered Tools (requires ANTHROPIC_API_KEY from console.anthropic.com):
   ai_analyze_map      - Get AI feedback on map design, difficulty, flow
@@ -104,7 +106,13 @@ mcp = FastMCP(
         "ai_describe_room for narrative room descriptions, and "
         "ai_suggest_entities for entity placement recommendations. "
         "Use install_loenn_manager to deploy the Lönn plugin that bridges "
-        "Lönn ↔ MCP for live two-way map editing."
+        "Lönn ↔ MCP for live two-way map editing. "
+        "PCGHelper tools (ported from the PCGHelper Lönn mod): "
+        "use pcg_mdmc_presets to list MdMC configuration matrices, "
+        "pcg_skeleton_generate to lay out a non-overlapping room skeleton, "
+        "pcg_markov_fill to fill rooms with MdMC/WFC/hybrid tile generation, "
+        "pcg_score_room to evaluate interestingness and difficulty (paper §4.2/§4.3), "
+        "and pcg_pipeline for a one-shot end-to-end generation pass."
     ),
 )
 
@@ -5087,6 +5095,554 @@ def ai_suggest_entities(
     if not path.exists():
         return f"File not found: {map_path}"
     return ai_analyzer.ai_suggest_entities(path, WORKSPACE, room_name, goal, model)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PCGHelper — Python port of the PCGHelper Lönn mod
+# ═══════════════════════════════════════════════════════════════════════════════
+
+try:
+    from . import pcg_helper as _ph          # installed package
+except ImportError:
+    import pcg_helper as _ph                 # run directly from source
+
+
+@mcp.tool()
+def pcg_mdmc_presets() -> str:
+    """List all available MdMC configuration matrix presets.
+
+    Returns the preset key (9-char matrix string) and its human-readable
+    description.  Pass one of these keys as the ``configuration`` parameter
+    to pcg_markov_fill or pcg_pipeline.
+    """
+    lines = ["MdMC configuration matrix presets:", ""]
+    for key, desc in sorted(_ph.MDMC_PRESETS.items()):
+        lines.append(f"  {key}  —  {desc}")
+    lines += [
+        "",
+        "Matrix layout (row-major): NW(0) N(1) NE(2) / W(3) .(4) E(5) / SW(6) S(7) SE(8)",
+        "  0 = ignore neighbour, 1 = use as context, 2 = target (treated as 1)",
+        f"Default: {_ph.MDMC_DEFAULT}",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def pcg_skeleton_generate(
+    map_path: str,
+    room_count: int = 12,
+    min_room_width_tiles: int = 30,
+    max_room_width_tiles: int = 50,
+    min_room_height_tiles: int = 16,
+    max_room_height_tiles: int = 28,
+    seed: int = -1,
+    max_retries: int = 50,
+    name_prefix: str = "skel_",
+    min_exit_width_tiles: int = 3,
+    validate_connectivity: bool = True,
+    ensure_loopbacks: bool = False,
+) -> str:
+    """Generate a skeleton room layout and add empty rooms to an existing map.
+
+    Lays out non-overlapping rooms connected edge-to-edge (paper requirements
+    1-3).  The first room is START (player spawn), the furthest room is END
+    (golden berry destination).  Rooms are added with solid border tiles and
+    empty interiors — run pcg_markov_fill afterwards to fill the tiles.
+
+    Args:
+        map_path: Path to the .bin file to add rooms to
+        room_count: Number of rooms to generate (default 12)
+        min_room_width_tiles: Minimum room width in tiles (×8 px, min 5)
+        max_room_width_tiles: Maximum room width in tiles (×8 px)
+        min_room_height_tiles: Minimum room height in tiles (×8 px, min 5)
+        max_room_height_tiles: Maximum room height in tiles (×8 px)
+        seed: Random seed (-1 = random each run)
+        max_retries: Max placement attempts per room before skipping
+        name_prefix: Prefix for generated room names (e.g. skel_0, skel_1 …)
+        min_exit_width_tiles: Minimum exit width in tiles (default 3 = 24 px)
+        validate_connectivity: Warn if any orphaned rooms are detected
+        ensure_loopbacks: Add extra connections to create loops in the layout
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+
+    result = _ph.generate_skeleton(
+        room_count=room_count,
+        min_w_tiles=min_room_width_tiles,
+        max_w_tiles=max_room_width_tiles,
+        min_h_tiles=min_room_height_tiles,
+        max_h_tiles=max_room_height_tiles,
+        seed=seed,
+        max_retries=max_retries,
+        name_prefix=name_prefix,
+        min_exit_width_tiles=min_exit_width_tiles,
+        validate_connectivity=validate_connectivity,
+        ensure_loopbacks=ensure_loopbacks,
+    )
+
+    slots = result["slots"]
+    warnings = result["warnings"]
+
+    if not slots:
+        return "Skeleton generation produced no rooms."
+
+    # Locate the levels child in the map
+    levels_el = cb.find_child(data, "levels")
+    if levels_el is None:
+        levels_el = {"__name": "levels", "__children": []}
+        data.setdefault("__children", []).append(levels_el)
+
+    TILE = _ph.TILE
+    added = []
+    for slot in slots:
+        b = slot["bounds"]
+        wt, ht = b["width"] // TILE, b["height"] // TILE
+        # Solid border, air interior
+        grid = _ph.new_grid(wt, ht, _ph._DEFAULT_TILE_CHAR)
+        for x in range(1, wt - 1):
+            for y in range(1, ht - 1):
+                grid[x][y] = "0"
+        tile_str = _ph.grid_to_tile_string(grid, wt, ht)
+
+        room_el: dict = {
+            "__name": "level",
+            "name": slot["name"],
+            "x": b["x"], "y": b["y"],
+            "width": b["width"], "height": b["height"],
+            "music": "", "musicAlternative": "", "ambience": "",
+            "musicLayer1": True, "musicLayer2": True,
+            "musicLayer3": True, "musicLayer4": True,
+            "dark": False, "space": False, "underwater": False,
+            "whisper": False, "windPattern": "None",
+            "cameraOffsetX": 0, "cameraOffsetY": 0,
+            "__children": [
+                {"__name": "solids", "innerText": tile_str},
+                {"__name": "bg", "innerText": ""},
+                {"__name": "entities", "__children": [
+                    {"__name": "player", "x": wt // 2 * TILE, "y": (ht - 3) * TILE, "id": 1}
+                ] if slot["is_start"] else []},
+                {"__name": "triggers", "__children": []},
+                {"__name": "decalsFg", "__children": []},
+                {"__name": "decalsBg", "__children": []},
+            ],
+        }
+        levels_el.setdefault("__children", []).append(room_el)
+        added.append(slot["name"])
+
+    cb.write_map(path, data)
+
+    lines = [f"Skeleton generated: {len(added)} rooms added to {map_path}"]
+    lines += [f"  {n}" for n in added]
+    if warnings:
+        lines.append("")
+        lines.extend(f"  WARNING: {w}" for w in warnings)
+    lines += [
+        "",
+        "Next step: run pcg_markov_fill on this map to fill tiles with MdMC/WFC generation,",
+        "or use pcg_pipeline for an all-in-one generation pass.",
+    ]
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def pcg_markov_fill(
+    map_path: str,
+    room_names: str = "",
+    configuration: str = "000011012",
+    generation_mode: str = "mdmc",
+    train_source: str = "all_rooms",
+    seed: int = -1,
+    max_backtrack_depth: int = 8,
+    max_retries: int = 20,
+    ensure_playable: bool = True,
+    place_entities: bool = True,
+    auto_tile: bool = True,
+    generate_bg: bool = False,
+    use_enhanced_bg: bool = False,
+    cleanup_passes: int = 2,
+    hazard_density: float = 0.05,
+    spring_density: float = 0.02,
+    use_pattern_mode: bool = False,
+    difficulty: int = 3,
+    place_decals: bool = True,
+    place_triggers: bool = True,
+    decal_density: float = 0.12,
+    trigger_mode: str = "camera",
+    w1: float = 1.0,
+    w2: float = 1.0,
+    w3: float = 1.0,
+    min_interestingness: float = 0.0,
+) -> str:
+    """Fill rooms with tiles using the MdMC/WFC algorithm (Markov Level Generator).
+
+    Trains a Multi-dimensional Markov Chain (MdMC) or Wave Function Collapse
+    (WFC) model on existing rooms in the map, then generates tile layouts for
+    the specified rooms with backtracking, cleanup, auto-tiling, playability
+    repair, and entity placement.
+
+    Args:
+        map_path: Path to the .bin file
+        room_names: Comma-separated room names to fill (empty = all rooms)
+        configuration: 9-char MdMC matrix string (see pcg_mdmc_presets)
+        generation_mode: "mdmc", "wfc", or "hybrid"
+        train_source: "all_rooms" (train on all rooms) or comma-separated names
+        seed: Random seed (-1 = random each run)
+        max_backtrack_depth: Max tiles to backtrack on unseen n-gram
+        max_retries: Full-room generation retries per room
+        ensure_playable: Platformer repair pass (BFS reachability + corridor carving)
+        place_entities: Place player spawn, strawberries, spikes after generation
+        auto_tile: Blend tile edges for smooth transitions
+        generate_bg: Also generate background tiles
+        use_enhanced_bg: Depth-appropriate BG fill
+        cleanup_passes: Number of cleanup passes (remove isolated tiles)
+        hazard_density: Density of spikes (0-1)
+        spring_density: Density of springs (0-1)
+        use_pattern_mode: Pattern mode (marioGen-v2 style) instead of MdMC
+        difficulty: Difficulty level 1-5 for pattern mode
+        place_decals: Place background and foreground decals
+        place_triggers: Place camera/spawn triggers
+        decal_density: Decal density (0-1)
+        trigger_mode: "camera", "spawn", "all", or "none"
+        w1: Weight for global NLE density in interestingness score
+        w2: Weight for local NLE density (AOI) in interestingness score
+        w3: Weight for NLE diversity (Shannon entropy) in interestingness score
+        min_interestingness: Minimum interestingness to accept a generated room
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    all_rooms = cb.get_rooms(data)
+    if not all_rooms:
+        return "No rooms found in map."
+
+    # Parse target room names
+    if room_names.strip():
+        target_names = {n.strip() for n in room_names.split(",") if n.strip()}
+    else:
+        target_names = None  # all rooms
+
+    # Parse training source
+    if train_source == "all_rooms":
+        training_rooms = all_rooms
+    else:
+        src_names = {n.strip() for n in train_source.split(",") if n.strip()}
+        training_rooms = [r for r in all_rooms if r.get("name", "") in src_names]
+        if not training_rooms:
+            training_rooms = all_rooms
+
+    # Train model
+    offsets = _ph.parse_config(configuration)
+    training_grids = []
+    for room in training_rooms:
+        w_px = room.get("width", 320)
+        h_px = room.get("height", 184)
+        wt, ht = w_px // _ph.TILE, h_px // _ph.TILE
+        tile_str = ""
+        for child in room.get("__children", []):
+            if child.get("__name") == "solids":
+                tile_str = child.get("innerText", "")
+                break
+        if tile_str:
+            g, gw, gh = _ph.grid_from_tile_string(tile_str)
+            training_grids.append((g, gw, gh))
+
+    mdmc_model = _ph.train_mdmc(training_grids, offsets) if training_grids else None
+    wfc_model = None
+    if generation_mode in ("wfc", "hybrid") and training_grids:
+        wfc_model = _ph.train_adjacency(training_grids, offsets)
+
+    rng = _ph.LcgRng(seed)
+    report_lines = []
+    filled = []
+
+    for room in all_rooms:
+        rname = room.get("name", "")
+        if target_names and rname not in target_names:
+            continue
+
+        wt = room.get("width", 320) // _ph.TILE
+        ht = room.get("height", 184) // _ph.TILE
+
+        if use_pattern_mode or not training_grids:
+            grid = _ph.generate_pattern_room(wt, ht, rng, difficulty)
+        elif generation_mode == "mdmc" and mdmc_model:
+            grid = _ph.mdmc_generate(mdmc_model, wt, ht, rng, max_backtrack_depth, max_retries)
+        elif generation_mode == "wfc" and wfc_model:
+            result_g = _ph.wfc_generate(wfc_model, wt, ht, rng)
+            grid = result_g if result_g else _ph.generate_pattern_room(wt, ht, rng, difficulty)
+        elif generation_mode == "hybrid" and mdmc_model:
+            grid = _ph.mdmc_generate(mdmc_model, wt, ht, rng, max_backtrack_depth, max_retries)
+        else:
+            grid = _ph.generate_pattern_room(wt, ht, rng, difficulty)
+
+        _ph.cleanup_tiles(grid, wt, ht, cleanup_passes)
+        if auto_tile:
+            _ph.auto_tile(grid, wt, ht)
+
+        interest = _ph.score_interestingness(grid, wt, ht, w1, w2, w3)
+        if interest < min_interestingness:
+            grid = _ph.generate_pattern_room(wt, ht, rng, difficulty)
+
+        if ensure_playable:
+            _ph.platformer_repair(grid, wt, ht)
+
+        tile_str = _ph.grid_to_tile_string(grid, wt, ht)
+        bg_str = ""
+        if generate_bg:
+            bg_grid = _ph.generate_bg(grid, wt, ht, use_enhanced_bg)
+            bg_str = _ph.grid_to_tile_string(bg_grid, wt, ht)
+
+        # Write tiles back
+        for child in room.get("__children", []):
+            if child.get("__name") == "solids":
+                child["innerText"] = tile_str
+            elif child.get("__name") == "bg" and generate_bg:
+                child["innerText"] = bg_str
+
+        if place_entities:
+            _ph.place_entities(room, grid, wt, ht, rng,
+                               hazard_density=hazard_density,
+                               spring_density=spring_density)
+        if place_decals:
+            _ph.place_decals(room, grid, wt, ht, rng, decal_density)
+        if place_triggers:
+            _ph.place_triggers(room, grid, wt, ht, rng, trigger_mode)
+
+        diff_score = _ph.score_difficulty(grid, wt, ht)
+        report_lines.append(
+            f"  {rname}: {wt}×{ht} tiles, "
+            f"interest={interest:.3f}, difficulty={diff_score:.3f}"
+        )
+        filled.append(rname)
+
+    if not filled:
+        return "No rooms matched the specified names."
+
+    cb.write_map(path, data)
+
+    return "\n".join([
+        f"Filled {len(filled)} room(s) in {map_path} using {generation_mode.upper()} mode:",
+        *report_lines,
+    ])
+
+
+@mcp.tool()
+def pcg_score_room(
+    map_path: str,
+    room_name: str,
+    w1: float = 1.0,
+    w2: float = 1.0,
+    w3: float = 1.0,
+    z1: float = 1.0,
+    z2: float = 1.0,
+    z3: float = 1.0,
+) -> str:
+    """Score a room's interestingness and difficulty (paper §4.2, §4.3).
+
+    Interestingness I = w1·global_NLE_density + w2·local_NLE_density + w3·entropy
+    Difficulty D      = z1·hole_frequency     + z2·local_LE_density  + z3·NLE_scarcity
+
+    NLE = Non-Linear Element (air cell with ≥2 solid neighbours, indicating
+    branching or complex geometry).  LE = Linear Element (straight solid run).
+
+    Args:
+        map_path: Path to the .bin file
+        room_name: Room name (with or without 'lvl_' prefix)
+        w1: Weight for global NLE density in interestingness (default 1.0)
+        w2: Weight for local NLE density (AOI) in interestingness (default 1.0)
+        w3: Weight for NLE diversity (Shannon entropy) in interestingness (default 1.0)
+        z1: Weight for hole frequency in difficulty (default 1.0)
+        z2: Weight for local LE density in difficulty (default 1.0)
+        z3: Weight for NLE scarcity in difficulty (default 1.0)
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    room = cb.get_room(data, room_name)
+    if room is None:
+        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
+
+    wt = room.get("width", 320) // _ph.TILE
+    ht = room.get("height", 184) // _ph.TILE
+    tile_str = ""
+    for child in room.get("__children", []):
+        if child.get("__name") == "solids":
+            tile_str = child.get("innerText", "")
+            break
+
+    if not tile_str:
+        return f"Room '{room_name}' has no tile data."
+
+    grid, gw, gh = _ph.grid_from_tile_string(tile_str)
+    w_eff, h_eff = min(wt, gw), min(ht, gh)
+
+    interest = _ph.score_interestingness(grid, w_eff, h_eff, w1, w2, w3)
+    diff = _ph.score_difficulty(grid, w_eff, h_eff, z1, z2, z3)
+
+    lines = [
+        f"Room: {room_name}  ({w_eff}×{h_eff} tiles)",
+        f"  Interestingness I = {interest:.4f}",
+        f"    w1·global_NLE_density + w2·local_NLE_density + w3·entropy",
+        f"  Difficulty D      = {diff:.4f}",
+        f"    z1·hole_frequency + z2·local_LE_density + z3·NLE_scarcity",
+    ]
+    if interest < 0.05:
+        lines.append("  ⚠ Low interestingness — consider more varied tile patterns.")
+    if diff > 0.8:
+        lines.append("  ⚠ High difficulty — room may be very challenging.")
+    elif diff < 0.1:
+        lines.append("  ⚠ Low difficulty — room may feel too easy/empty.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def pcg_pipeline(
+    map_path: str,
+    room_count: int = 8,
+    room_width_tiles: int = 40,
+    room_height_tiles: int = 23,
+    proba: float = 0.5,
+    carve_exits: bool = True,
+    configuration: str = "000011012",
+    generation_mode: str = "mdmc",
+    seed: int = -1,
+    max_backtrack_depth: int = 8,
+    tries_limit: int = 20,
+    ensure_playable: bool = True,
+    place_entities: bool = True,
+    name_prefix: str = "gen_",
+    auto_tile: bool = True,
+    generate_bg: bool = False,
+    use_enhanced_bg: bool = False,
+    cleanup_passes: int = 2,
+    hazard_density: float = 0.05,
+    spring_density: float = 0.02,
+    use_pattern_mode: bool = False,
+    difficulty: int = 3,
+    place_decals: bool = True,
+    place_triggers: bool = True,
+    decal_density: float = 0.12,
+    trigger_mode: str = "camera",
+    w1: float = 1.0,
+    w2: float = 1.0,
+    w3: float = 1.0,
+    min_interestingness: float = 0.0,
+    z1: float = 1.0,
+    z2: float = 2.0,
+    z3: float = 1.0,
+) -> str:
+    """End-to-end PCG pipeline: skeleton → MdMC/WFC tile fill → repair → entities.
+
+    Combines the Celeste Skeleton Generator and Markov Level Generator into a
+    single one-shot generator.  Trains on existing rooms in the map, generates
+    a skeleton of non-overlapping rooms, fills each room with tiles using the
+    chosen algorithm, runs playability repair, and places entities/decals/triggers.
+
+    Args:
+        map_path: Path to the .bin file (rooms are added to this map)
+        room_count: Number of rooms to generate (default 8)
+        room_width_tiles: Width of every room in tiles (×8 px)
+        room_height_tiles: Height of every room in tiles (×8 px)
+        proba: Skeleton pathway/labyrinth parameter. 0=pathway (chain),
+               1=labyrinth (random attach), 0.5=balanced
+        carve_exits: Carve 3-tile-wide doorways between adjacent rooms
+        configuration: 9-char MdMC matrix string (see pcg_mdmc_presets)
+        generation_mode: "mdmc", "wfc", or "hybrid"
+        seed: Random seed (-1 = random each run)
+        max_backtrack_depth: Max tiles to backtrack on unseen n-gram
+        tries_limit: Full-room generation retries per room
+        ensure_playable: Platformer repair pass
+        place_entities: Place player spawn, strawberries, spikes, springs
+        name_prefix: Prefix for generated room names (gen_0, gen_1 …)
+        auto_tile: Blend tile edges for smooth transitions
+        generate_bg: Also generate background tiles
+        use_enhanced_bg: Depth-appropriate BG fill
+        cleanup_passes: Number of cleanup passes
+        hazard_density: Density of spikes placed on walkable surfaces (0-1)
+        spring_density: Density of springs in vertical passages (0-1)
+        use_pattern_mode: Pattern mode (marioGen-v2) instead of MdMC
+        difficulty: Difficulty level 1-5 for pattern mode / hazard density
+        place_decals: Place background/foreground decals
+        place_triggers: Place camera/spawn triggers
+        decal_density: Decal density (0-1)
+        trigger_mode: "camera", "spawn", "all", or "none"
+        w1: Interestingness weight — global NLE density
+        w2: Interestingness weight — local NLE density (AOI)
+        w3: Interestingness weight — NLE diversity (Shannon entropy)
+        min_interestingness: Minimum interestingness to accept a room (0 = accept any)
+        z1: Difficulty weight — hole frequency
+        z2: Difficulty weight — local LE density
+        z3: Difficulty weight — NLE scarcity
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+
+    data = cb.read_map(path)
+    training_rooms = cb.get_rooms(data)
+
+    result = _ph.run_pipeline(
+        training_rooms=training_rooms,
+        room_count=room_count,
+        room_w_tiles=room_width_tiles,
+        room_h_tiles=room_height_tiles,
+        proba=proba,
+        carve_exits_flag=carve_exits,
+        configuration=configuration,
+        generation_mode=generation_mode,
+        max_backtrack_depth=max_backtrack_depth,
+        tries_limit=tries_limit,
+        seed=seed,
+        w1=w1, w2=w2, w3=w3,
+        min_interestingness=min_interestingness,
+        z1=z1, z2=z2, z3=z3,
+        ensure_playable=ensure_playable,
+        place_entities_flag=place_entities,
+        name_prefix=name_prefix,
+        auto_tile_flag=auto_tile,
+        generate_bg_flag=generate_bg,
+        use_enhanced_bg=use_enhanced_bg,
+        cleanup_passes=cleanup_passes,
+        hazard_density=hazard_density,
+        spring_density=spring_density,
+        use_pattern_mode=use_pattern_mode,
+        difficulty=difficulty,
+        place_decals_flag=place_decals,
+        place_triggers_flag=place_triggers,
+        decal_density=decal_density,
+        trigger_mode=trigger_mode,
+    )
+
+    new_rooms = result["rooms"]
+    report = result["report"]
+
+    if not new_rooms:
+        return f"Pipeline produced no rooms.\n{report}"
+
+    # Append new rooms to map
+    levels_el = cb.find_child(data, "levels")
+    if levels_el is None:
+        levels_el = {"__name": "levels", "__children": []}
+        data.setdefault("__children", []).append(levels_el)
+
+    levels_el.setdefault("__children", []).extend(new_rooms)
+    cb.write_map(path, data)
+
+    names = [r.get("name", "?") for r in new_rooms]
+    return "\n".join([
+        f"PCG pipeline complete: {len(new_rooms)} rooms added to {map_path}",
+        f"Rooms: {', '.join(names)}",
+        "",
+        "Per-room report:",
+        report,
+    ])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
