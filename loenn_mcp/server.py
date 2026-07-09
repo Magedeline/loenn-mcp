@@ -14,6 +14,7 @@ Tools (categories):
   Room Settings:    get_room_settings, update_room_settings,
                     rename_room, move_room, resize_room
   Map Metadata:     get_map_metadata, set_map_metadata
+  Audio Events:     replace_audio_event
   Dependencies:     get_map_dependencies, set_map_dependencies
   Decals:           list_decals, add_decal, remove_decal
   Stylegrounds:     list_stylegrounds, add_styleground, remove_styleground,
@@ -95,7 +96,13 @@ mcp = FastMCP(
         "Room settings (music, dark/space/wind/physics) can be read and written "
         "with get_room_settings / update_room_settings. "
         "Map-wide metadata (wipe type, intro, color grade) uses "
-        "get_map_metadata / set_map_metadata. "
+        "get_map_metadata / set_map_metadata — pass subpath (e.g. "
+        "\"mode/audiostate\") to reach nested per-side audio overrides "
+        "such as Music/AltMusic/AmbienceProgress that live below meta. "
+        "To rename or fix an FMOD audio event across an entire map in one "
+        "call — metadata, every room, and entities with their own audio "
+        "override — use replace_audio_event instead of editing rooms one "
+        "at a time. "
         "Mod dependencies are managed with get_map_dependencies / "
         "set_map_dependencies (writes everest.yaml). "
         "Use analyze_map_assets for ML-powered asset validation against the "
@@ -4411,12 +4418,47 @@ def _ensure_meta_node(data: dict) -> dict:
     return meta
 
 
+def _ensure_nested_node(root: dict, subpath: str) -> dict:
+    """Return (creating as needed) the nested element at a '/'-separated
+    subpath below *root*, e.g. "mode/audiostate". Missing intermediate
+    elements are created automatically. Empty subpath returns *root* itself.
+    """
+    node = root
+    for part in [p for p in subpath.split("/") if p]:
+        child = cb.find_child(node, part)
+        if child is None:
+            child = {"__name": part, "__children": []}
+            node.setdefault("__children", []).append(child)
+        node = child
+    return node
+
+
+def _format_meta_node(el: dict, indent: int = 1) -> list[str]:
+    """Recursively format an element's attributes and all descendant
+    elements. Meta nodes commonly nest audio/side overrides several levels
+    deep (e.g. meta -> mode -> audiostate -> Music), so this must not stop
+    at one level or those attributes silently disappear from the report.
+    """
+    pad = "  " * indent
+    lines = []
+    for k, v in el.items():
+        if k not in ("__name", "__children"):
+            lines.append(f"{pad}{k} = {v!r}")
+    for child in el.get("__children", []):
+        cname = child.get("__name", "?")
+        lines.append(f"\n{pad}[{cname}]")
+        lines.extend(_format_meta_node(child, indent + 1))
+    return lines
+
+
 @mcp.tool()
 def get_map_metadata(map_path: str) -> str:
     """Read the map-level metadata block (Everest/celeste.yaml meta settings).
 
     Returns the meta node that stores settings like wipe type, intro type,
-    heart texture, cassette song, and other map-wide overrides.
+    heart texture, cassette song, and other map-wide overrides — including
+    nested settings such as mode/audiostate (per-side Music, AltMusic,
+    AmbienceProgress, etc.), which are reported at any nesting depth.
 
     Args:
         map_path: Path to the .bin file
@@ -4446,9 +4488,7 @@ def get_map_metadata(map_path: str) -> str:
         for child in meta.get("__children", []):
             cname = child.get("__name", "?")
             lines.append(f"\n  [{cname}]")
-            for k, v in child.items():
-                if k not in ("__name", "__children"):
-                    lines.append(f"    {k} = {v!r}")
+            lines.extend(_format_meta_node(child, indent=2))
     else:
         lines.append("No meta node found (this is normal for most maps).")
 
@@ -4456,7 +4496,7 @@ def get_map_metadata(map_path: str) -> str:
 
 
 @mcp.tool()
-def set_map_metadata(map_path: str, settings: str) -> str:
+def set_map_metadata(map_path: str, settings: str, subpath: str = "") -> str:
     """Set map-level metadata properties (Everest meta block).
 
     These properties control map-wide behaviour like wipe type, mountain
@@ -4472,10 +4512,21 @@ def set_map_metadata(map_path: str, settings: str) -> str:
       Dreaming        – bool
       CassetteNoteColor – hex color string
 
+    By default this only touches attributes directly on the meta element
+    itself. Several commonly-edited settings — most notably the per-side
+    audio overrides shown in Lönn's "Map Metadata" dialog (Music, AltMusic,
+    AmbienceProgress, MusicLayers, etc.) — actually live nested under
+    meta -> mode -> audiostate, not on meta directly. Use subpath to reach
+    those (and any other nested meta child) instead of silently no-op'ing.
+
     Args:
         map_path: Path to the .bin file
         settings: JSON object of meta key/value pairs to set,
                   e.g. '{"Wipe": "Mountain", "Dreaming": true}'
+        subpath: Optional '/'-separated path to a nested element under meta
+                 to target instead of meta itself, e.g. "mode/audiostate"
+                 for '{"Music": "event:/music/DZ/lvl2/beginning"}'. Missing
+                 intermediate elements are created automatically.
     """
     path = _resolve(map_path)
     if not path.exists():
@@ -4490,21 +4541,88 @@ def set_map_metadata(map_path: str, settings: str) -> str:
         return "settings must be a JSON object."
 
     meta = _ensure_meta_node(data)
+    target = _ensure_nested_node(meta, subpath) if subpath else meta
     applied = []
     for k, v in props.items():
         if v is None:
-            if k in meta:
-                del meta[k]
+            if k in target:
+                del target[k]
                 applied.append(f"-{k}")
         else:
-            meta[k] = v
+            target[k] = v
             applied.append(f"{k}={v!r}")
 
     cb.write_map(path, data)
+    label = data.get('_package', '?') + (f" [meta/{subpath}]" if subpath else " [meta]")
     return (
-        f"Map metadata updated for '{data.get('_package', '?')}':\n"
+        f"Map metadata updated for '{label}':\n"
         + ("  " + ", ".join(applied) if applied else "  (no changes)")
     )
+
+
+def _walk_replace_strings(
+    el: dict, old: str, new: str, changes: list[tuple[str, str, str, str]], path: str = ""
+) -> None:
+    """Recursively substring-replace *old* with *new* in every string
+    attribute anywhere under *el* (meta, rooms, entities, triggers, ...),
+    skipping structural keys and raw tile/innerText data. Mutates in place
+    and appends (element_path, key, old_value, new_value) to *changes*.
+    """
+    name = el.get("__name", "")
+    node_path = f"{path}/{name}" if path else name
+    for k, v in el.items():
+        if k in ("__name", "__children") or k == "innerText":
+            continue
+        if isinstance(v, str) and old in v:
+            new_v = v.replace(old, new)
+            changes.append((node_path, k, v, new_v))
+            el[k] = new_v
+    for child in el.get("__children", []):
+        _walk_replace_strings(child, old, new, changes, node_path)
+
+
+@mcp.tool()
+def replace_audio_event(map_path: str, old_event: str, new_event: str, dry_run: bool = False) -> str:
+    """Find and replace an FMOD audio event path anywhere in a map.
+
+    update_room and set_map_metadata each only reach one room, or the meta
+    element's own attributes — they cannot bulk-rename an audio event that
+    is scattered across map metadata (including nested mode/audiostate),
+    every room's music/ambience attributes, and any entity or trigger that
+    carries its own audio override (e.g. lightningBlock, PowerGenerator).
+    This tool walks the entire element tree instead, so a rename like
+    "pusheen" -> "DZ" reaches every occurrence in one call.
+
+    Args:
+        map_path: Path to the .bin file
+        old_event: Substring to find, e.g. "pusheen" or a full event path
+                    like "event:/music/pusheen/lvl2/beginning"
+        new_event: Replacement substring, e.g. "DZ"
+        dry_run: If true, report what would change without writing the file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+
+    changes: list[tuple[str, str, str, str]] = []
+    _walk_replace_strings(data, old_event, new_event, changes)
+
+    if not changes:
+        return f"No occurrences of {old_event!r} found in {map_path}."
+
+    affected = len({c[0] for c in changes})
+    lines = [
+        f"{'Would update' if dry_run else 'Updated'} {len(changes)} value(s) "
+        f"across {affected} element(s):"
+    ]
+    for node_path, key, old_v, new_v in changes:
+        lines.append(f"  {node_path} | {key}: {old_v} -> {new_v}")
+
+    if not dry_run:
+        cb.write_map(path, data)
+
+    return "\n".join(lines)
 
 
 @mcp.tool()

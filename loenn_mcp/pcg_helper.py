@@ -749,8 +749,25 @@ def _find_exposed_top_surfaces(
 # Entity / decal / trigger placement helpers
 # ---------------------------------------------------------------------------
 
+_ENTITY_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "strawberry": {"winged": False, "golden": False},
+    "spikes": {"type": "default"},
+    "spring": {"direction": "up"},
+}
+
+_TRIGGER_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "CameraTargetTrigger": {
+        "lerpStrength": 0.5, "positionMode": "NoEffect", "xOnly": False,
+        "targetEntities": "", "deleteFlag": "",
+    },
+}
+
+
 def _build_entity(name: str, x: int, y: int, attrs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     ent: Dict[str, Any] = {"__name": name, "x": x, "y": y, "id": 0}
+    defaults = _ENTITY_DEFAULTS.get(name)
+    if defaults:
+        ent.update(defaults)
     if attrs:
         ent.update(attrs)
     return ent
@@ -812,9 +829,12 @@ def place_entities(
         ents.append(_build_entity("player", spawn["x"] * TILE, spawn["y"] * TILE))
         placed += 1
 
-    # Golden berry
+    # Golden berry — vanilla Celeste has no separate "goldenBerry" entity;
+    # golden berries are "strawberry" entities with golden=True.
     if is_end:
-        ents.append(_build_entity("goldenBerry", w * TILE // 2, max(0, h * TILE // 2 - TILE * 2)))
+        ents.append(_build_entity(
+            "strawberry", w * TILE // 2, max(0, h * TILE // 2 - TILE * 2), {"golden": True}
+        ))
         placed += 1
 
     # Strawberries
@@ -854,8 +874,50 @@ def place_entities(
     return placed
 
 
-BG_DECAL_SET = ["particles/star", "particles/dust", "particles/snow"]
-FG_DECAL_SET = ["scenery/plant", "scenery/grass", "scenery/edge"]
+# Valid vanilla Celeste decal paths (relative to Graphics/Atlases/Gameplay).
+# The earlier "scenery/*" names don't exist in the vanilla graphics dump, so
+# Lönn and the in-game renderer silently failed to draw them — use the real
+# decals/generic/* and particles/* files instead.
+BG_DECAL_SET = ["particles/circle", "particles/cloud", "particles/blob"]
+FG_DECAL_SET = ["decals/generic/grass_a", "decals/generic/grass_b", "decals/generic/hanginggrass_a"]
+
+_KNOWN_DECAL_TEXTURES = frozenset({
+    "particles/circle", "particles/cloud", "particles/blob", "particles/snow", "particles/fire",
+    "particles/stars/00", "particles/starfield/00",
+    "decals/generic/grass_a", "decals/generic/grass_b", "decals/generic/grass_c", "decals/generic/grass_d",
+    "decals/generic/hanginggrass_a",
+    "decals/generic/snow_a", "decals/generic/snow_b", "decals/generic/snow_c", "decals/generic/snow_d",
+    "decals/generic/snow_e", "decals/generic/snow_f", "decals/generic/snow_g", "decals/generic/snow_h",
+    "decals/generic/snow_i", "decals/generic/snow_j", "decals/generic/snow_k", "decals/generic/snow_l",
+    "decals/generic/snow_m", "decals/generic/snow_n", "decals/generic/snow_o",
+    "decals/generic/algae_a", "decals/generic/algae_b", "decals/generic/algae_c",
+    "decals/generic/algae_d", "decals/generic/algae_e",
+})
+
+_DECAL_DIRECTORY_VARIANTS: Dict[str, str] = {
+    "decals/generic/grass": "decals/generic/grass_a",
+    "decals/generic/snow": "decals/generic/snow_a",
+    "decals/generic/algae": "decals/generic/algae_a",
+    "particles/stars": "particles/stars/00",
+    "particles/starfield": "particles/starfield/00",
+}
+
+
+def resolve_decal_texture(name: Optional[str]) -> str:
+    """Validate a decal texture path, falling back to a safe vanilla file.
+
+    Directory-shaped names (e.g. "decals/generic/grass") resolve to a known
+    variant; anything else unrecognised falls back to a particle that is
+    guaranteed to render, rather than silently drawing nothing.
+    """
+    if not name:
+        return "particles/circle"
+    if name in _KNOWN_DECAL_TEXTURES:
+        return name
+    variant = _DECAL_DIRECTORY_VARIANTS.get(name)
+    if variant:
+        return variant
+    return "particles/circle"
 
 
 def place_decals(
@@ -872,6 +934,9 @@ def place_decals(
     """
     if density <= 0:
         return 0
+
+    room_w = room.get("width", w * TILE)
+    room_h = room.get("height", h * TILE)
 
     air_cells = [
         {"x": x, "y": y}
@@ -892,37 +957,41 @@ def place_decals(
     decals_bg = _ensure_section(room, "decalsBg")
     decals_fg = _ensure_section(room, "decalsFg")
 
-    bg_count = int(len(air_cells) * density / 8)
+    bg_count = int(len(air_cells) * density / 8) if BG_DECAL_SET else 0
     for _ in range(bg_count):
         if not air_cells:
             break
         c = air_cells[rng.next(len(air_cells))]
-        name = BG_DECAL_SET[rng.next(len(BG_DECAL_SET))]
+        name = resolve_decal_texture(BG_DECAL_SET[rng.next(len(BG_DECAL_SET))])
         scale = 0.4 + rng.next_double() * 0.6
         rot = rng.next_double() * 0.2 - 0.1
+        dx = max(0, min(room_w - 1, c["x"] * TILE + rng.next(TILE)))
+        dy = max(0, min(room_h - 1, c["y"] * TILE + rng.next(TILE)))
         decals_bg.setdefault("__children", []).append({
             "__name": "decal",
             "texture": name,
-            "x": c["x"] * TILE + rng.next(TILE),
-            "y": c["y"] * TILE + rng.next(TILE),
+            "x": dx,
+            "y": dy,
             "scaleX": scale, "scaleY": scale, "rotation": rot,
         })
         placed += 1
 
-    fg_count = int(len(walls) * density / 2)
+    fg_count = int(len(walls) * density / 2) if FG_DECAL_SET else 0
     for _ in range(fg_count):
         if not walls:
             break
         c = walls[rng.next(len(walls))]
-        name = FG_DECAL_SET[rng.next(len(FG_DECAL_SET))]
+        name = resolve_decal_texture(FG_DECAL_SET[rng.next(len(FG_DECAL_SET))])
         ox = (-rng.next_double() * 4 if c.get("side") == "left" else rng.next_double() * 4)
         oy = rng.next_double() * 4
         scale = 0.8 + rng.next_double() * 0.4
+        dx = max(0, min(room_w - 1, c["x"] * TILE + ox))
+        dy = max(0, min(room_h - 1, c["y"] * TILE + oy))
         decals_fg.setdefault("__children", []).append({
             "__name": "decal",
             "texture": name,
-            "x": c["x"] * TILE + ox,
-            "y": c["y"] * TILE + oy,
+            "x": dx,
+            "y": dy,
             "scaleX": scale, "scaleY": scale, "rotation": 0.0,
         })
         placed += 1
@@ -951,6 +1020,8 @@ def place_triggers(
     trigs: List[Dict[str, Any]] = trg_el.setdefault("__children", [])
 
     if trigger_mode in ("camera", "all"):
+        room_w = room.get("width", w * TILE)
+        room_h = room.get("height", h * TILE)
         high_points = [f for f in floors if f["y"] < h // 2]
         for _ in range(rng.next(len(high_points) + 1)):
             high_points.append({"x": rng.next(w), "y": rng.next(h // 2)})
@@ -959,13 +1030,19 @@ def place_triggers(
             c = high_points[rng.next(len(high_points))]
             tw = min(w * TILE // 2, 160)
             th = min(h * TILE, 120)
+            tx = max(0, c["x"] * TILE - tw // 2)
+            ty = max(0, c["y"] * TILE - th // 2)
+            # Clamp so the trigger always renders inside the room.
+            if tx + tw > room_w:
+                tx = max(0, room_w - tw)
+            if ty + th > room_h:
+                ty = max(0, room_h - th)
             trigs.append({
                 "__name": "CameraTargetTrigger",
-                "x": max(0, c["x"] * TILE - tw // 2),
-                "y": max(0, c["y"] * TILE - th // 2),
+                "x": tx, "y": ty,
                 "width": tw, "height": th,
                 "lerpStrength": 0.5, "positionMode": "NoEffect",
-                "xOnly": False,
+                "xOnly": False, "targetEntities": "", "deleteFlag": "",
                 "targetX": c["x"] * TILE,
                 "targetY": c["y"] * TILE,
             })

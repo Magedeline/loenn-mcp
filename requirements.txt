@@ -1,2 +1,2 @@
-fastmcp>=3.0.0,<4
+fastmcp>=3.4.0,<4
 anthropic>=0.40.0

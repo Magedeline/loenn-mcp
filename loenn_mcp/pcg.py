@@ -93,6 +93,13 @@ def _count_entity_types(room: Dict[str, Any]) -> Dict[str, int]:
             for e in child.get("__children", []):
                 t = e.get("__name", "unknown")
                 counts[t] = counts.get(t, 0) + 1
+                # Vanilla Celeste has no separate "goldenBerry" entity — golden
+                # berries are "strawberry" entities with golden=True. Track
+                # them under a synthetic "goldenBerry" bucket too, or callers
+                # keying off that name (e.g. generate_room_from_pattern's
+                # golden-berry chance) always see zero for real maps.
+                if t == "strawberry" and e.get("golden"):
+                    counts["goldenBerry"] = counts.get("goldenBerry", 0) + 1
             return counts
     return {}
 
@@ -427,15 +434,15 @@ def generate_entities_for_room(
 
     # ── Collectible ──
     if rng.random() < collectible_chance:
-        etype = (
-            "goldenBerry"
-            if (ent_ref.get("goldenBerry", 0) > 0 and rng.random() < 0.3)
-            else "strawberry"
-        )
+        # Golden berries are "strawberry" entities with golden=True — there is
+        # no separate "goldenBerry" entity type in vanilla Celeste.
+        is_golden = ent_ref.get("goldenBerry", 0) > 0 and rng.random() < 0.3
         entities.append({
-            "__name": etype,
+            "__name": "strawberry",
             "__children": [],
             "id": next_id,
+            "golden": is_golden,
+            "winged": False,
             "x": rng.randint(width // 4, width * 3 // 4),
             "y": rng.randint(height // 4, height * 3 // 4),
         })
