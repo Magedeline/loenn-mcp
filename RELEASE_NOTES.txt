@@ -1,3 +1,51 @@
+loenn-mcp v5.3.0
+================
+
+Audio-event reach fixes, PCGHelper bug-fix sync, and a verified fastmcp bump.
+
+
+WHAT'S NEW IN v5.3.0
+--------------------
+
+Audio events:
+  - New tool: replace_audio_event(map_path, old_event, new_event, dry_run).
+    get_map_metadata / set_map_metadata only ever reached the meta element's
+    own attributes, and update_room only touches one room at a time — so
+    renaming an FMOD event (e.g. a namespace rename like "pusheen" -> "DZ")
+    meant editing rooms one by one and missing anything nested. This walks
+    the entire tree in one call: map metadata (including nested elements),
+    every room, and any entity/trigger carrying its own audio override
+    (lightningBlock, PowerGenerator, etc).
+  - Fixed: get_map_metadata / set_map_metadata could not read or write
+    settings nested below meta (e.g. meta -> mode -> audiostate -> Music,
+    AltMusic, AmbienceProgress — the per-side audio overrides shown in
+    Lönn's "Map Metadata" dialog). get_map_metadata now recurses to any
+    depth instead of stopping one level in; set_map_metadata takes an
+    optional `subpath` (e.g. "mode/audiostate") to target nested elements,
+    creating missing intermediate elements as needed.
+
+PCGHelper sync (from Maggy-Studio/PCGHelper's decal/entity-placement fix):
+  - Golden berries are now emitted as "strawberry" entities with
+    golden=True, matching the real vanilla entity — the Python port was
+    still emitting a nonexistent "goldenBerry" entity type in
+    pcg_helper.place_entities, pcg_helper.run_pipeline, and
+    pcg.generate_room_from_pattern (where it also meant the "reuse golden
+    berries from the reference room" heuristic could never trigger, since
+    reference rooms are counted by their real entity name).
+  - Decal texture catalog replaced with real vanilla paths
+    (decals/generic/*, particles/*) — the previous scenery/* paths don't
+    exist in the graphics dump and rendered nothing. Added
+    resolve_decal_texture() to validate/fall back safely.
+  - Decal and CameraTargetTrigger placement now clamp to room bounds
+    instead of occasionally landing outside the room.
+  - Added default attributes for strawberry/spikes/spring entities and
+    CameraTargetTrigger so generated rooms don't ship with missing fields.
+
+Dependencies:
+  - Bumped minimum fastmcp from 3.0.0 to 3.4.0 (verified against the latest
+    3.4.4). No API changes affected this project between 3.2.x and 3.4.x.
+
+
 loenn-mcp v5.2.0
 ================
 
