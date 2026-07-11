@@ -475,6 +475,8 @@ pcg_markov_fill(
     room_names="skel_0,skel_1,skel_2",
     generation_mode="wfc",
     configuration="010111010",
+    start_room="skel_0",  # gets the player spawn
+    end_room="skel_2",    # gets the golden berry
     seed=99,
 )
 ```

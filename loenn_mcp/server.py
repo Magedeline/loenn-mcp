@@ -5372,6 +5372,8 @@ def pcg_markov_fill(
     configuration: str = "000011012",
     generation_mode: str = "mdmc",
     train_source: str = "all_rooms",
+    start_room: str = "",
+    end_room: str = "",
     seed: int = -1,
     max_backtrack_depth: int = 8,
     max_retries: int = 20,
@@ -5407,6 +5409,8 @@ def pcg_markov_fill(
         configuration: 9-char MdMC matrix string (see pcg_mdmc_presets)
         generation_mode: "mdmc", "wfc", or "hybrid"
         train_source: "all_rooms" (train on all rooms) or comma-separated names
+        start_room: Room name to receive the player spawn entity (empty = none)
+        end_room: Room name to receive the golden berry entity (empty = none)
         seed: Random seed (-1 = random each run)
         max_backtrack_depth: Max tiles to backtrack on unseen n-gram
         max_retries: Full-room generation retries per room
@@ -5524,6 +5528,8 @@ def pcg_markov_fill(
 
         if place_entities:
             _ph.place_entities(room, grid, wt, ht, rng,
+                               is_start=(rname == start_room),
+                               is_end=(rname == end_room),
                                hazard_density=hazard_density,
                                spring_density=spring_density)
         if place_decals:

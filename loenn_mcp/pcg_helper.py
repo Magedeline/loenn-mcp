@@ -396,6 +396,32 @@ def train_mdmc(
     return {"offsets": offsets, "table": table}
 
 
+def _causal_scan_dirs(offsets: List[Dict[str, int]]) -> Tuple[int, int]:
+    """Pick a raster scan direction that maximises causal MdMC context.
+
+    ``mdmc_generate`` fills the grid one cell at a time and can only read
+    *already-generated* neighbours; anything else is still air.  A neighbour
+    offset with ``dy != 0`` is fully causal or fully acausal purely based on
+    the row-scan direction (the whole neighbouring row is complete before
+    the current row starts, regardless of x), while an offset with
+    ``dy == 0`` depends purely on the column-scan direction within a row.
+    The two axes are therefore optimised independently, each picking the
+    direction that makes the majority of that axis's offsets causal (ties
+    favour the standard top-left-to-bottom-right direction).
+
+    Returns (x_dir, y_dir), each +1 (ascending/forward) or -1 (descending).
+    """
+    dy_pos = sum(1 for o in offsets if o["dy"] > 0)
+    dy_neg = sum(1 for o in offsets if o["dy"] < 0)
+    y_dir = -1 if dy_pos > dy_neg else 1
+
+    dx_pos = sum(1 for o in offsets if o["dy"] == 0 and o["dx"] > 0)
+    dx_neg = sum(1 for o in offsets if o["dy"] == 0 and o["dx"] < 0)
+    x_dir = -1 if dx_pos > dx_neg else 1
+
+    return x_dir, y_dir
+
+
 def mdmc_generate(
     model: Dict[str, Any],
     w: int,
@@ -405,9 +431,21 @@ def mdmc_generate(
     max_retries: int = 20,
     keep_border: bool = True,
 ) -> List[List[str]]:
-    """Generate a tile grid using the MdMC model with backtracking."""
+    """Generate a tile grid using the MdMC model with backtracking.
+
+    Cells are visited in whichever raster direction (see
+    ``_causal_scan_dirs``) makes the configured neighbour offsets causal —
+    i.e. already generated — as often as possible, so the n-gram context
+    looked up at each cell reflects real neighbouring tiles instead of the
+    grid's still-unvisited (all-air) initial state.
+    """
     offsets = model["offsets"]
     table = model["table"]
+
+    x_dir, y_dir = _causal_scan_dirs(offsets)
+    xs = range(w) if x_dir == 1 else range(w - 1, -1, -1)
+    ys = range(h) if y_dir == 1 else range(h - 1, -1, -1)
+    coords = [(cx, cy) for cy in ys for cx in xs]
 
     def _pick(ctx_key: str) -> str:
         entry = table.get(ctx_key)
@@ -431,7 +469,7 @@ def mdmc_generate(
         backtrack_budget = max_backtrack
 
         while pos < total:
-            x, y = pos % w, pos // w
+            x, y = coords[pos]
             ctx_parts = []
             for o in offsets:
                 nx2, ny2 = x + o["dx"], y + o["dy"]
