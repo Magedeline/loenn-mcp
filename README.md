@@ -10,7 +10,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 ## Features
 
-**87 MCP tools** across 19 categories for complete map manipulation and AI-assisted design.
+**78 MCP tools** across 18 categories for complete map manipulation and AI-assisted design.
 
 ### Core Tools
 
@@ -89,15 +89,6 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 - `generate_map_from_image` — Convert color-mapped images to playable maps
 - `generate_terrain_map` — Procedural maps with Perlin noise + Voronoi biomes
 - `preview_terrain_biomes` — Preview biome layout before generation
-
-### Procedural Generation (Advanced)
-
-**PCGHelper Tools** — MdMC/WFC tile generation
-- `pcg_mdmc_presets` — List configuration presets
-- `pcg_skeleton_generate` — Layout non-overlapping room skeleton
-- `pcg_markov_fill` — Fill rooms with MdMC/WFC/hybrid
-- `pcg_score_room` — Evaluate interestingness & difficulty
-- `pcg_pipeline` — One-shot end-to-end generation
 
 ---
 
@@ -411,75 +402,6 @@ ai_suggest_entities(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", goal
 - `add_secrets` — Exploration rewards
 
 Gracefully degrades if `ANTHROPIC_API_KEY` is not set.
-
----
-
-## Advanced PCG (MdMC/WFC)
-
-Full Python port of [PCGHelper Lönn mod](https://github.com/Maggy-Studio/PCGHelper) — MdMC/WFC tile generation, skeleton layout, and end-to-end pipeline.
-
-### Tools
-
-| Tool | Description |
-|---|---|
-| `pcg_mdmc_presets` | List 7 MdMC configuration presets |
-| `pcg_skeleton_generate` | Layout non-overlapping room skeleton |
-| `pcg_markov_fill` | Fill rooms with MdMC/WFC/hybrid |
-| `pcg_score_room` | Evaluate interestingness & difficulty |
-| `pcg_pipeline` | One-shot end-to-end generation |
-
-### Generation Modes
-- `mdmc` — Multi-dimensional Markov Chain
-- `wfc` — Wave Function Collapse
-- `hybrid` — Combination of both
-
-### Scoring Metrics
-
-**Interestingness I** = w1·global_NLE + w2·local_NLE + w3·Shannon_entropy
-
-**Difficulty D** = z1·hole_frequency + z2·local_LE + z3·NLE_scarcity
-
-### MdMC Presets
-
-| Key | Description |
-|---|---|
-| `000011012` | L-shape (default) |
-| `000011112` | 3-neighbour causal |
-| `001001112` | 4-neighbour |
-| `011011012` | 5-neighbour |
-| `010111010` | Cross (WFC recommended) |
-| `101000101` | Diagonals only |
-| `111101111` | All 8 neighbours |
-
-### Example
-
-```python
-# One-shot end-to-end generation
-pcg_pipeline(
-    map_path="Maps/MyMod/1-City.bin",
-    room_count=8,
-    generation_mode="mdmc",
-    seed=42,
-    ensure_playable=True,
-    place_entities=True,
-)
-# → "PCG pipeline complete: 8 rooms added"
-
-# Score a room
-pcg_score_room(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03")
-# → "Interestingness I = 0.4231 | Difficulty D = 0.5812"
-
-# Fill existing empty rooms
-pcg_markov_fill(
-    map_path="Maps/MyMod/1-City.bin",
-    room_names="skel_0,skel_1,skel_2",
-    generation_mode="wfc",
-    configuration="010111010",
-    start_room="skel_0",  # gets the player spawn
-    end_room="skel_2",    # gets the golden berry
-    seed=99,
-)
-```
 
 ---
 

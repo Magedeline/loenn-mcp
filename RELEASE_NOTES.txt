@@ -1,3 +1,26 @@
+loenn-mcp v6.0.0
+================
+
+Removed the PCGHelper tool set (MdMC/WFC Markov-chain tile generation and
+skeleton layout) from this free/lite build. This is a breaking change if you
+were calling pcg_mdmc_presets, pcg_skeleton_generate, pcg_markov_fill,
+pcg_score_room, or pcg_pipeline.
+
+
+WHAT CHANGED IN v6.0.0
+-----------------------
+
+PCGHelper removal:
+  - Removed pcg_mdmc_presets, pcg_skeleton_generate, pcg_markov_fill,
+    pcg_score_room, and pcg_pipeline (the MdMC/WFC Markov Level Generator
+    tools, ported from the PCGHelper Lönn mod).
+  - Removed loenn_mcp/pcg_helper.py, the module backing those tools.
+  - All other procedural generation stays: build_pattern_library,
+    generate_room_from_pattern, ingest_external_map, generate_map_from_image,
+    generate_terrain_map, preview_terrain_biomes.
+  - 78 tools remain (was 83), across 18 categories (was 19).
+
+
 loenn-mcp v5.3.1
 ================
 
