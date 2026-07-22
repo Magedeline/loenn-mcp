@@ -1,3 +1,48 @@
+loenn-mcp v7.0.0
+================
+
+AI removal, map.bin write safety, and the new pcgscene CLI.
+
+
+WHAT CHANGED IN v7.0.0
+-----------------------
+
+AI removal (breaking):
+  - Removed ai_analyze_map, ai_describe_room, ai_suggest_entities and the
+    loenn_mcp/ai_analyzer.py module.
+  - Removed the anthropic package dependency. loenn-mcp no longer needs an
+    API key and makes no calls to any AI/LLM service. Every remaining tool
+    is deterministic/procedural.
+  - Disclaimer: this project was developed with the assistance of Claude
+    (Anthropic) as a coding tool, based on the algorithms in Robinet et al.,
+    "Towards a Celeste AI Framework" (FDG '25). All output is human-tested.
+
+map.bin write safety:
+  - celeste_bin.write_map now (1) round-trip validates the serialized bytes
+    before touching the target file, (2) keeps rolling .bak1..bak3 backups,
+    and (3) atomically replaces the target via a temp file. A crashed or
+    invalid write can no longer destroy a map.
+  - New helpers: serialize_map(), read_map_bytes().
+
+New: pcgscene CLI (console script), batch-first for big maps:
+  - pcgscene scan <map.bin>      score every room (interestingness,
+                                 difficulty, exits, in-room connectivity,
+                                 spawn presence, fairness gate) + map-level
+                                 reachability from the start room
+  - pcgscene score <map> -r NAME single-room deep report
+  - pcgscene validate <map.bin>  in-game readiness checklist, exit code 0/1
+  - pcgscene fix <map.bin>       safe auto-repairs: add missing spawns,
+                                 sanitize room names, convert
+                                 strawberry{golden} to goldenBerry;
+                                 supports --dry-run and --only
+  - pcgscene diff <a> <b>        room/entity/tile changes between two maps
+  - pcgscene generate <map.bin>  preset-driven generation (quick /
+                                 simple_fair / explore / challenge) with
+                                 reproducible --seed; requires the full
+                                 build's pcg_helper module
+  - Every command supports --json (and --out FILE) for editor integration.
+
+
 loenn-mcp v6.0.0
 ================
 

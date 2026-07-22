@@ -349,59 +349,19 @@ Analysis results persist in `.loenn_mcp_wiki/` as JSON files for instant re-use 
 
 ---
 
-## AI-Powered Analysis
+## No AI Inside (v7.0.0)
 
-Leverage Claude AI for intelligent map feedback, room descriptions, and entity suggestions.
+As of v7.0.0 every tool in loenn-mcp is **deterministic and procedural** —
+Markov chains, wave-function collapse, noise, BFS/graph analysis. The server
+makes **no calls to any AI/LLM API**, requires no API key, and ships no AI
+models. The former `ai_analyze_map` / `ai_describe_room` / `ai_suggest_entities`
+tools and the `anthropic` dependency were removed.
 
-### Setup
-```bash
-pip install loenn-mcp
-export ANTHROPIC_API_KEY="sk-ant-..."  # Get from https://console.anthropic.com/
-```
-
-### Available Tools
-
-| Tool | Description |
-|---|---|
-| `ai_analyze_map` | Design feedback (general/difficulty/visual/flow) |
-| `ai_describe_room` | Generate room descriptions in various styles |
-| `ai_suggest_entities` | Entity placement recommendations with coordinates |
-
-### Examples
-
-```python
-# Get design feedback
-ai_analyze_map(map_path="Maps/MyMod/1-City.bin", analysis_type="general")
-# → "Strengths: Good checkpoints. Add more strawberries in rooms 3-5..."
-
-# Generate descriptions
-ai_describe_room(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", style="atmospheric")
-# → "A windswept precipice where ancient stone meets howling gales..."
-
-# Get entity suggestions
-ai_suggest_entities(map_path="Maps/MyMod/1-City.bin", room_name="lvl_a-03", goal="add_challenge")
-# → "1. Add spikes at (120, 80) for timing challenge..."
-```
-
-### Analysis Types
-- `general` — Overall design with suggestions
-- `difficulty` — Difficulty curve analysis
-- `visual` — Visual variety and theme feedback
-- `flow` — Player movement and navigation
-
-### Description Styles
-- `atmospheric` — Evocative, mood-focused
-- `technical` — Gameplay-focused
-- `story` — Narrative snippets
-- `brief` — 1-2 sentence summaries
-
-### Suggestion Goals
-- `improve_flow` — Better player guidance
-- `add_challenge` — Skill-testing elements
-- `reduce_difficulty` — Accessibility
-- `add_secrets` — Exploration rewards
-
-Gracefully degrades if `ANTHROPIC_API_KEY` is not set.
+> **Disclaimer:** this project was developed with the assistance of Claude
+> (Anthropic) as a coding tool, based on the algorithms published in
+> Robinet et al., *"Towards a Celeste AI Framework"* (FDG '25,
+> DOI 10.1145/3723498.3723796). All output has been human-tested in Lönn and
+> in-game.
 
 ---
 
@@ -453,13 +413,6 @@ Gracefully degrades if `ANTHROPIC_API_KEY` is not set.
 - Batch validation and auto-fix
 - Actionable suggestions
 
-**`ai_analyzer.py`** — AI-powered analysis
-- Claude API integration
-- Design feedback (general, difficulty, visual, flow)
-- Room descriptions (atmospheric, technical, story, brief)
-- Entity placement suggestions
-- Graceful degradation
-
 **`server.py`** — MCP server
 - Built with [FastMCP](https://github.com/jlowin/fastmcp)
 - Path-traversal protection
@@ -472,7 +425,6 @@ Gracefully degrades if `ANTHROPIC_API_KEY` is not set.
 
 - Python 3.9+
 - `fastmcp >= 3.0.0`
-- `anthropic >= 0.40.0` (optional, for AI-powered tools)
 - `Pillow >= 9.0` (optional, for image-to-map conversion)
 
 Install with all optional features:

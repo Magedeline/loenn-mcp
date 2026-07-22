@@ -14,6 +14,8 @@ Value type tags:
   5: lookup string, 6: raw string, 7: RLE-encoded string
 """
 
+import os
+import shutil
 import struct
 from pathlib import Path
 from typing import Any
@@ -269,21 +271,13 @@ def _write_element(w: BinaryWriter, element: dict, lookup: dict[str, int]):
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-def read_map(path: str | Path) -> dict:
-    """Read a Celeste .bin map file and return the element tree.
-
-    Returns a dict with keys:
-      __name: element name (e.g. "Map")
-      __children: list of child elements
-      _package: map package name
-      + any attributes on the root element
-    """
-    data = Path(path).read_bytes()
+def read_map_bytes(data: bytes, expected_header: str = "CELESTE MAP") -> dict:
+    """Parse Celeste .bin map bytes and return the element tree."""
     r = BinaryReader(data)
 
     header = r.read_string()
-    if header != "CELESTE MAP":
-        raise ValueError(f"Invalid header: '{header}' (expected 'CELESTE MAP')")
+    if header != expected_header:
+        raise ValueError(f"Invalid header: '{header}' (expected '{expected_header}')")
 
     package = r.read_string()
 
@@ -295,8 +289,39 @@ def read_map(path: str | Path) -> dict:
     return root
 
 
-def write_map(path: str | Path, data: dict, header: str = "CELESTE MAP"):
-    """Write a Celeste .bin map file from an element tree."""
+def read_map(path: str | Path) -> dict:
+    """Read a Celeste .bin map file and return the element tree.
+
+    Returns a dict with keys:
+      __name: element name (e.g. "Map")
+      __children: list of child elements
+      _package: map package name
+      + any attributes on the root element
+    """
+    return read_map_bytes(Path(path).read_bytes())
+
+
+# Number of rolling .bak copies kept next to each map file.
+BACKUP_KEEP = 3
+
+
+def _rotate_backups(path: Path, keep: int = BACKUP_KEEP):
+    """Shift path.bak1 -> .bak2 -> ... and copy the current file to .bak1.
+
+    The current file itself is only copied, never moved, so the map stays
+    intact until the atomic replace swaps in the validated new version.
+    """
+    def bak(i: int) -> Path:
+        return path.with_name(path.name + f".bak{i}")
+
+    for i in range(keep - 1, 0, -1):
+        if bak(i).exists():
+            os.replace(bak(i), bak(i + 1))
+    shutil.copy2(path, bak(1))
+
+
+def serialize_map(data: dict, header: str = "CELESTE MAP") -> bytes:
+    """Serialize an element tree to Celeste .bin bytes (no file I/O)."""
     seen: set[str] = set()
     _collect_strings(data, seen)
 
@@ -312,7 +337,45 @@ def write_map(path: str | Path, data: dict, header: str = "CELESTE MAP"):
         w.write_string(s)
 
     _write_element(w, data, lookup)
-    Path(path).write_bytes(w.get_bytes())
+    return w.get_bytes()
+
+
+def write_map(path: str | Path, data: dict, header: str = "CELESTE MAP",
+              backup: bool = True, validate: bool = True):
+    """Write a Celeste .bin map file from an element tree — safely.
+
+    A destroyed map.bin is unrecoverable for the user, so this never touches
+    the target file until the new bytes are known-good:
+      1. serialize to memory
+      2. round-trip self-check: re-parse the bytes (validate=True)
+      3. write to a temp file next to the target
+      4. rotate rolling backups of the existing file (backup=True)
+      5. atomically replace the target with the temp file
+    """
+    path = Path(path)
+    payload = serialize_map(data, header)
+
+    if validate:
+        try:
+            read_map_bytes(payload, expected_header=header)
+        except Exception as exc:
+            raise ValueError(
+                f"Refusing to write {path.name}: serialized map failed "
+                f"round-trip validation ({exc})"
+            ) from exc
+
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(payload)
+    try:
+        if backup and path.exists():
+            _rotate_backups(path)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 # ─── Tree Navigation Helpers ──────────────────────────────────────────────────

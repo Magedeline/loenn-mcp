@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "loenn-mcp"
-version = "6.0.0"
+version = "7.0.0"
 description = "Celeste map editor for AI agents — MCP server for reading, editing, previewing, and procedurally generating .bin map files"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -25,7 +25,6 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "fastmcp>=3.4.0,<4",
-    "anthropic>=0.40.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +37,7 @@ Issues = "https://github.com/Maggy-Studio/loenn-mcp/issues"
 
 [project.scripts]
 loenn-mcp = "loenn_mcp.server:main"
+pcgscene = "loenn_mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["loenn_mcp"]

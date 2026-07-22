@@ -35,18 +35,14 @@ Tools (categories):
                     validate_room, ingest_external_map
   Image/Terrain:    generate_map_from_image, generate_terrain_map,
                     preview_terrain_biomes
-  AI Analysis:      ai_analyze_map, ai_describe_room, ai_suggest_entities (Claude API)
   Lönn Manager:     install_loenn_manager, get_loenn_manager_source
 
-AI-Powered Tools (requires ANTHROPIC_API_KEY from console.anthropic.com):
-  ai_analyze_map      - Get AI feedback on map design, difficulty, flow
-  ai_describe_room    - Generate narrative descriptions of rooms
-  ai_suggest_entities - Get entity placement recommendations
+All tools are deterministic/procedural — no AI models, no network calls to
+LLM APIs. (The former ai_* tools were removed in v7.0.0.)
 
 Usage:
   python server.py                         (uses cwd as workspace)
   LOENN_MCP_WORKSPACE=/path python server.py  (explicit workspace)
-  ANTHROPIC_API_KEY=xxx python server.py   (with AI tools enabled)
 """
 
 import io
@@ -69,14 +65,12 @@ try:
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
-    from . import ai_analyzer                 # installed package
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import pcg                               # run directly from source
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
     import gdep_tools                        # run directly from source
-    import ai_analyzer                       # run directly from source
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -106,10 +100,6 @@ mcp = FastMCP(
         "Use analyze_map_assets for ML-powered asset validation against the "
         "Maddie480 graphics dump (maddie480.ovh/celeste/graphics-dump-browser) "
         "and the CelestialCartographers/Loenn entity catalog. "
-        "AI-POWERED TOOLS (requires ANTHROPIC_API_KEY): "
-        "Use ai_analyze_map for Claude-powered design feedback, "
-        "ai_describe_room for narrative room descriptions, and "
-        "ai_suggest_entities for entity placement recommendations. "
         "Use install_loenn_manager to deploy the Lönn plugin that bridges "
         "Lönn ↔ MCP for live two-way map editing."
     ),
@@ -5129,82 +5119,6 @@ _VANILLA_ENTITIES = frozenset({
     "coreMessage", "playbackTutorial", "playbackBillboard",
     "eventTrigger",
 })
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  AI-POWERED ANALYSIS TOOLS (Claude API)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@mcp.tool()
-def ai_analyze_map(
-    map_path: str,
-    analysis_type: str = "general",
-    model: str = "claude-3-5-sonnet-20241022",
-) -> str:
-    """Analyze a map using Claude AI and get improvement suggestions.
-
-    Requires ANTHROPIC_API_KEY environment variable.
-    Get your API key from: https://console.anthropic.com/
-
-    Args:
-        map_path: Path to the .bin file
-        analysis_type: Type of analysis - "general", "difficulty", "visual", "flow"
-        model: Claude model (default: claude-3-5-sonnet-20241022)
-    """
-    path = _resolve(map_path)
-    if not path.exists():
-        return f"File not found: {map_path}"
-    return ai_analyzer.ai_analyze_map(path, WORKSPACE, analysis_type, model)
-
-
-@mcp.tool()
-def ai_describe_room(
-    map_path: str,
-    room_name: str,
-    style: str = "atmospheric",
-    model: str = "claude-3-5-sonnet-20241022",
-) -> str:
-    """Generate an AI-powered narrative description of a room.
-
-    Requires ANTHROPIC_API_KEY environment variable.
-
-    Args:
-        map_path: Path to the .bin file
-        room_name: Room name (with or without 'lvl_' prefix)
-        style: Description style - "atmospheric", "technical", "story", "brief"
-        model: Claude model (default: claude-3-5-sonnet-20241022)
-    """
-    path = _resolve(map_path)
-    data = cb.read_map(path)
-    room = cb.get_room(data, room_name)
-    if room is None:
-        return f"Room '{room_name}' not found. Available: {_room_names(data)}"
-    return ai_analyzer.ai_generate_room_description(
-        room, data.get("_package", "?"), style, model
-    )
-
-
-@mcp.tool()
-def ai_suggest_entities(
-    map_path: str,
-    room_name: str,
-    goal: str = "improve_flow",
-    model: str = "claude-3-5-sonnet-20241022",
-) -> str:
-    """Get AI suggestions for entity placement in a room.
-
-    Requires ANTHROPIC_API_KEY environment variable.
-
-    Args:
-        map_path: Path to the .bin file
-        room_name: Room name
-        goal: Suggestion goal - "improve_flow", "add_challenge", "reduce_difficulty", "add_secrets"
-        model: Claude model (default: claude-3-5-sonnet-20241022)
-    """
-    path = _resolve(map_path)
-    if not path.exists():
-        return f"File not found: {map_path}"
-    return ai_analyzer.ai_suggest_entities(path, WORKSPACE, room_name, goal, model)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
