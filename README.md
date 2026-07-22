@@ -3,14 +3,32 @@
 [![PyPI](https://img.shields.io/pypi/v/loenn-mcp)](https://pypi.org/project/loenn-mcp/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![No AI inside](https://img.shields.io/badge/AI%20inside-none-brightgreen.svg)](#no-ai-inside-v700)
 
-**AI-powered Celeste map editor** — A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that brings full Celeste `.bin` map editing to Claude, GitHub Copilot, and other MCP clients. Read, edit, analyze, generate, and preview maps without opening Lönn.
+**A Celeste map editor for AI agents** — a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that brings full Celeste `.bin` map editing to Claude, GitHub Copilot, and other MCP clients, plus a standalone `pcgscene` CLI for scripting and CI. Read, edit, analyze, generate, and preview maps without opening Lönn.
+
+*"For AI agents" describes who talks to this server (any MCP client), not what runs inside it — every tool here is deterministic and procedural. See [No AI Inside](#no-ai-inside-v700).*
 
 Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [Lönn](https://github.com/CelestialCartographers/Loenn) or [Ahorn](https://github.com/CelestialCartographers/Ahorn).
 
+## Contents
+
+- [Features](#features)
+- [Installation & setup](#installation--setup)
+- [`pcgscene` CLI](#pcgscene-cli)
+- [Procedural generation](#procedural-generation)
+- [Image-to-map conversion](#image-to-map-conversion)
+- [Seeded terrain generation](#seeded-terrain-generation)
+- [Analysis & insights](#analysis--insights)
+- [No AI inside (v7.0.0)](#no-ai-inside-v700)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [License](#license)
+
 ## Features
 
-**78 MCP tools** across 18 categories for complete map manipulation and AI-assisted design.
+**75 MCP tools** for complete map manipulation, plus the `pcgscene` command-line tool for scripting and CI.
 
 ### Core Tools
 
@@ -101,7 +119,7 @@ pip install loenn-mcp
 
 Or from source:
 ```bash
-git clone https://github.com/Maggy-Studio/loenn-mcp
+git clone https://github.com/Magedeline/loenn-mcp
 cd loenn-mcp
 pip install -e .
 ```
@@ -146,6 +164,37 @@ python -m loenn_mcp.preview_map Maps/01_City_A.bin g-   # filter by prefix
 ```
 
 The interactive HTML preview supports zoom, pan, room details, search, and minimap with keyboard shortcuts.
+
+---
+
+## `pcgscene` CLI
+
+A batch-first command-line tool for scanning and repairing maps outside an
+MCP client — install once, use from scripts, pre-commit hooks, or CI. Every
+command that touches a `.bin` file writes through the same atomic,
+backed-up, round-trip-validated path as the MCP server, so a bad run can
+never destroy a map.
+
+```bash
+pip install loenn-mcp
+pcgscene scan MyMap.bin              # score every room + map connectivity
+pcgscene validate MyMap.bin          # in-game readiness checklist (exit 0/1)
+pcgscene fix MyMap.bin --dry-run     # preview safe auto-repairs
+pcgscene fix MyMap.bin               # apply them (backed up first)
+pcgscene diff before.bin after.bin   # what changed between two maps
+```
+
+| Command | What it does |
+|---|---|
+| `scan` | Scores every room (interestingness, difficulty, exit connectivity, spawn presence, fairness gate) plus map-wide reachability from the start room. |
+| `score` | Deep report for a single room (`--room NAME`). |
+| `validate` | In-game readiness checklist — bad names, missing spawns, sealed exits, unreachable rooms — with a CI-friendly exit code. |
+| `fix` | Safe auto-repairs: adds missing spawns, sanitizes bad room names, converts `strawberry{golden}` to real `goldenBerry` entities. Supports `--dry-run` and `--only spawns,names,berries`. |
+| `diff` | Room/entity/tile changes between two maps. |
+| `generate` | Preset-driven generation (`quick` / `simple_fair` / `explore` / `challenge`) with a reproducible `--seed`. Requires the `pcg_helper` module from the full/Pro build ([loenn-mcp-delta](https://github.com/Magedeline/loenn-mcp-delta)) — this build's `generate` refuses gracefully and tells you so. |
+
+Every command accepts `--json` (and `--out FILE`) for machine-readable
+output, so an editor plugin or CI step can consume the report directly.
 
 ---
 
@@ -418,6 +467,10 @@ tools and the `anthropic` dependency were removed.
 - Path-traversal protection
 - Atomic map writes
 - Explicit download confirmation
+
+**`cli.py`** — `pcgscene` command-line tool
+- scan / score / validate / fix / diff, all `--json`-capable
+- Shares `celeste_bin`'s atomic-write path — no separate write logic to drift
 
 ---
 
