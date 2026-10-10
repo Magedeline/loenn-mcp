@@ -45,6 +45,8 @@ Usage:
   LOENN_MCP_WORKSPACE=/path python server.py  (explicit workspace)
 """
 
+import difflib
+import fnmatch
 import io
 import json
 import os
@@ -53,6 +55,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -1016,23 +1019,22 @@ def list_entity_definitions(filter_text: str = "") -> str:
     if not ent_dir.exists():
         return "No Loenn/entities/ directory found."
 
-    files = sorted(ent_dir.glob("*.lua"))
+    by_file: dict[Path, list[str]] = {}
+    for name, f in _definition_index("entities").items():
+        by_file.setdefault(f, []).append(name)
+    files = sorted(ent_dir.rglob("*.lua"))
     if filter_text:
         fl = filter_text.lower()
-        files = [f for f in files if fl in f.stem.lower()]
+        files = [f for f in files
+                 if fl in f.stem.lower() or any(fl in n.lower() for n in by_file.get(f, []))]
 
     if not files:
         return "No matching entity definitions."
 
     lines = [f"Entity definitions ({len(files)} files):"]
     for f in files:
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-            m = re.search(r"\.name\s*=\s*[\"']([^\"']+)", text)
-            label = m.group(1) if m else f.stem
-        except Exception:
-            label = f.stem
-        lines.append(f"  {f.stem}  →  {label}")
+        names = by_file.get(f) or [f.stem]
+        lines.append(f"  {f.relative_to(ent_dir).with_suffix('')}  →  {', '.join(names)}")
     return "\n".join(lines)
 
 
@@ -1041,12 +1043,19 @@ def get_entity_definition(entity_file: str) -> str:
     """Read a Lönn entity Lua definition and extract its properties.
 
     Args:
-        entity_file: Filename (e.g. "kirbyBoss" or "kirbyBoss.lua")
+        entity_file: Entity name as placed in maps (e.g. "CEL/KrackoBoss") or a
+            filename (e.g. "kirbyBoss" or "kirbyBoss.lua")
     """
+    ent_dir = (WORKSPACE / "Loenn" / "entities").resolve()
+    by_name = _definition_index("entities").get(entity_file)
+    if by_name is not None:
+        entity_file = str(by_name.relative_to(ent_dir))
+    elif "/" in entity_file and not entity_file.endswith(".lua"):
+        return (f"No Lönn definition declares the entity '{entity_file}'. "
+                "Use find_missing_definitions or audit_plugin_coverage to see what is undefined.")
     if not entity_file.endswith(".lua"):
         entity_file += ".lua"
 
-    ent_dir = (WORKSPACE / "Loenn" / "entities").resolve()
     path = (ent_dir / entity_file).resolve()
     # Guard against path traversal (e.g. entity_file = "../../secrets")
     try:
@@ -1137,6 +1146,266 @@ def list_effect_definitions(filter_text: str = "") -> str:
         except Exception:
             label = f.stem
         lines.append(f"  {f.stem}  →  {label}")
+    return "\n".join(lines)
+
+
+# ─── Definition coverage: which placed / coded names have a Lönn plugin ──────
+
+# A namespaced object name declared by a Lönn plugin: `.name = "CEL/Foo"` or
+# `name = "CEL/Foo"` inside a table. Vanilla objects have no namespace slash,
+# so only namespaced names are checked.
+_DEF_NAME_RE = re.compile(r"""(?:\.name|\bname)\s*=\s*["']([^"'\s]+/[^"'\s]+)["']""")
+_CUSTOM_ENTITY_RE = re.compile(r"\[\s*(?:Celeste\.Mod\.Entities\.)?CustomEntity\s*\(([^)]*)\)")
+_installed_names_cache: dict[str, set[str]] = {}
+
+
+def _definition_index(kind: str) -> dict[str, Path]:
+    """Map every namespaced name declared under Loenn/<kind>/ to the file declaring it."""
+    base = WORKSPACE / "Loenn" / kind
+    index: dict[str, Path] = {}
+    if base.exists():
+        for f in sorted(base.rglob("*.lua")):
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for name in _DEF_NAME_RE.findall(text):
+                index.setdefault(name, f)
+    return index
+
+
+def _installed_definition_names() -> set[str]:
+    """Namespaced names declared by the Lönn plugins of every other installed mod.
+
+    Only used when the workspace sits in a Celeste `Mods/` folder; scans sibling
+    mod folders and zips. Cached for the life of the server.
+    """
+    mods = WORKSPACE.parent
+    key = str(mods)
+    if key in _installed_names_cache:
+        return _installed_names_cache[key]
+    names: set[str] = set()
+    if mods.name.lower() == "mods":
+        for entry in mods.iterdir():
+            if entry.resolve() == WORKSPACE:
+                continue
+            try:
+                if entry.is_dir() and (entry / "Loenn").is_dir():
+                    for f in (entry / "Loenn").rglob("*.lua"):
+                        names.update(_DEF_NAME_RE.findall(f.read_text(encoding="utf-8", errors="replace")))
+                elif entry.suffix.lower() == ".zip":
+                    with zipfile.ZipFile(entry) as z:
+                        for n in z.namelist():
+                            if n.lower().startswith("loenn/") and n.endswith(".lua"):
+                                names.update(_DEF_NAME_RE.findall(z.read(n).decode("utf-8", "replace")))
+            except (OSError, zipfile.BadZipFile):
+                continue
+    _installed_names_cache[key] = names
+    return names
+
+
+def _compiled_sources(source_dir: Path) -> tuple[list[Path], str]:
+    """The .cs files a .csproj actually compiles, and a note on how that was decided.
+
+    Projects with an explicit `<Compile Include=...>` list (default compile
+    items disabled) build exactly those files; otherwise every .cs file builds
+    except folders listed in `<Compile Remove=...>`.
+    """
+    includes: list[str] = []
+    removes: list[str] = []
+    explicit = False
+    for proj in source_dir.glob("*.csproj"):
+        text = proj.read_text(encoding="utf-8", errors="replace")
+        includes += re.findall(r'<Compile\s+Include="([^"]+)"', text)
+        removes += re.findall(r'<Compile\s+Remove="([^"]+)"', text)
+        explicit |= bool(re.search(r"<EnableDefaultCompileItems>\s*false", text, re.I))
+    norm = lambda p: p.replace("\\", "/").lower()
+    every = sorted(source_dir.rglob("*.cs"))
+    if explicit and includes:
+        pats = [norm(i) for i in includes]
+        chosen = [f for f in every
+                  if any(fnmatch.fnmatch(norm(str(f.relative_to(source_dir))), p) for p in pats)]
+        return chosen, f"{len(chosen)} files from the .csproj Include list"
+    prefixes = [norm(r).split("*")[0].rstrip("/") + "/" for r in removes if norm(r).split("*")[0]]
+    chosen = [f for f in every
+              if not any(norm(str(f.relative_to(source_dir))).startswith(p) for p in prefixes)]
+    return chosen, f"{len(chosen)} files, {len(prefixes)} removed folder(s)"
+
+
+@mcp.tool()
+def find_missing_definitions(map_path: str) -> str:
+    """List namespaced entities and triggers in a map that no installed Lönn plugin defines.
+
+    Lönn shows such objects as placeholders and cannot edit their fields; they
+    are often stale IDs from renamed helpers. Checks the workspace's Loenn/
+    folder and, when the workspace is inside Celeste/Mods, every other
+    installed mod's plugins. Vanilla (un-namespaced) names are not checked.
+
+    Args:
+        map_path: Path to the .bin file.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    data = cb.read_map(path)
+    defined = set(_definition_index("entities")) | set(_definition_index("triggers"))
+    defined |= _installed_definition_names()
+
+    missing: dict[str, list[str]] = {}
+    total = 0
+    for room in cb.get_rooms(data):
+        rname = _short_room(room.get("name", "?"))
+        for group in ("entities", "triggers"):
+            node = cb.find_child(room, group)
+            for obj in (node or {}).get("__children", []):
+                name = obj.get("__name", "")
+                if "/" not in name:
+                    continue
+                total += 1
+                if name not in defined:
+                    missing.setdefault(name, []).append(rname)
+
+    lines = [f"Lönn definition check: {path.stem}",
+             f"  Namespaced objects placed: {total}",
+             f"  Names with no Lönn plugin: {len(missing)}"]
+    for name, rooms in sorted(missing.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        shown = ", ".join(sorted(set(rooms))[:6]) + (" …" if len(set(rooms)) > 6 else "")
+        lines.append(f"    {name}  ×{len(rooms)}  in {shown}")
+    if not missing:
+        lines.append("  Every namespaced object has a Lönn definition.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def audit_plugin_coverage(source_dir: str = "Source", prefix: str = "") -> str:
+    """Compare the mod's C# [CustomEntity] names with its Lönn plugin definitions.
+
+    Reports names registered in code that have no Lönn plugin (they cannot be
+    placed from Lönn) and Lönn definitions with no C# registration in the
+    workspace (placing them does nothing unless another mod provides them).
+    Folders removed from compilation in the .csproj are skipped.
+
+    Args:
+        source_dir: C# source folder relative to the workspace (default "Source").
+        prefix: Only report names starting with this (e.g. "CEL/").
+    """
+    src = _resolve(source_dir)
+    if not src.is_dir():
+        return f"Source folder not found: {source_dir}"
+    files, how = _compiled_sources(src)
+    coded: dict[str, str] = {}
+    for f in files:
+        text = f.read_text(encoding="utf-8", errors="replace")
+        for args in _CUSTOM_ENTITY_RE.findall(text):
+            for name in re.findall(r'"([^"]+)"', args):
+                name = name.split("=")[0].strip()
+                if "/" in name:
+                    coded.setdefault(name, f.relative_to(src).as_posix())
+    plugins = set(_definition_index("entities")) | set(_definition_index("triggers"))
+    if prefix:
+        coded = {k: v for k, v in coded.items() if k.startswith(prefix)}
+        plugins = {p for p in plugins if p.startswith(prefix)}
+
+    no_plugin = sorted(set(coded) - plugins)
+    no_code = sorted(plugins - set(coded) - _installed_definition_names())
+    lines = [f"Plugin coverage ({source_dir}: {how})",
+             f"  Registered in C#: {len(coded)}   Lönn definitions: {len(plugins)}",
+             f"\n  In C# but no Lönn plugin ({len(no_plugin)}):"]
+    lines += [f"    {n}   ({coded[n]})" for n in no_plugin] or ["    none"]
+    lines.append(f"\n  Lönn plugin but no C# registration ({len(no_code)}):")
+    lines += [f"    {n}" for n in no_code] or ["    none"]
+    return "\n".join(lines)
+
+
+def _short_room(name: str) -> str:
+    """Room name as the game sees it: Celeste strips the 'lvl_' prefix at load."""
+    return name[4:] if name.startswith("lvl_") else name
+
+
+def _game_root() -> Path | None:
+    """Walk up from the workspace to the Celeste install (the folder holding Content/)."""
+    for p in [WORKSPACE, *WORKSPACE.parents]:
+        if (p / "Content" / "FMOD").is_dir():
+            return p
+    return None
+
+
+@mcp.tool()
+def validate_audio(map_path: str) -> str:
+    """Check every audio event a map references against the sound banks.
+
+    Looks at the map metadata (music, ambience, cassette song, postcard sound),
+    each room's music/alt music/ambience and every entity or trigger attribute
+    holding an `event:/` path. Known events come from the workspace's GUIDs.txt
+    and the game's vanilla FMOD strings banks. A missing event plays nothing in
+    game. Fix with replace_audio_event.
+
+    Args:
+        map_path: Path to the .bin file.
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    known: set[str] = set()
+    guids = WORKSPACE / "GUIDs.txt"
+    if guids.exists():
+        known.update(re.findall(r"(event:/\S+)", guids.read_text(encoding="utf-8", errors="replace")))
+    root = _game_root()
+    if root:
+        for bank in (root / "Content" / "FMOD" / "Desktop").glob("*.strings.bank"):
+            known.update(m.decode("utf-8", "replace")
+                         for m in re.findall(rb"event:/[\x21-\x7e]+?(?=\x00)", bank.read_bytes()))
+    if not known:
+        return "No sound bank list found (no GUIDs.txt in the workspace and no game Content/FMOD folder)."
+
+    def ok(event: str, key: str) -> bool:
+        if key == "PostcardSoundID":  # the game appends _in / _out
+            return event + "_in" in known
+        return event in known
+
+    refs: list[tuple[str, str, str]] = []  # (event, where, key)
+    data = cb.read_map(path)
+    meta = cb.find_child(data, "meta")
+
+    def walk_meta(el: dict, where: str):
+        for k, v in el.items():
+            if isinstance(v, str) and v.startswith("event:/"):
+                refs.append((v, f"meta{where}.{k}", k))
+        for ch in el.get("__children", []):
+            walk_meta(ch, f"{where}/{ch.get('__name', '?')}")
+
+    if meta:
+        walk_meta(meta, "")
+    for room in cb.get_rooms(data):
+        rname = _short_room(room.get("name", "?"))
+        for k in ("music", "alt_music", "ambience"):
+            v = room.get(k, "")
+            if isinstance(v, str) and v.startswith("event:/"):
+                refs.append((v, f"{rname}.{k}", k))
+        for group in ("entities", "triggers"):
+            node = cb.find_child(room, group)
+            for obj in (node or {}).get("__children", []):
+                for k, v in obj.items():
+                    if isinstance(v, str) and v.startswith("event:/"):
+                        refs.append((v, f"{rname}:{obj.get('__name', '?')}.{k}", k))
+
+    bad: dict[str, list[str]] = {}
+    for event, where, key in refs:
+        if not ok(event, key):
+            bad.setdefault(event, []).append(where)
+    lines = [f"Audio check: {path.stem}",
+             f"  Event references: {len(refs)}   Missing from the banks: {len(bad)}",
+             f"  Known events: {len(known)} (GUIDs.txt{' + vanilla banks' if root else ''})"]
+    tails = {e.split("/", 2)[-1].lower(): e for e in known}
+    for event, wheres in sorted(bad.items()):
+        lines.append(f"\n  ✗ {event}")
+        lines.append(f"      used at: {', '.join(wheres[:5])}{' …' if len(wheres) > 5 else ''}")
+        tail = event.split("/", 2)[-1].lower()
+        close = difflib.get_close_matches(tail, list(tails), n=2, cutoff=0.6)
+        if close:
+            lines.append(f"      closest existing: {', '.join(tails[c] for c in close)}")
+    if not bad:
+        lines.append("  Every referenced event exists.")
     return "\n".join(lines)
 
 
@@ -1453,11 +1722,96 @@ def preview_map_section(
     return "\n".join(output_lines)
 
 
+
+# ─── Map preview detail: tiles and entity markers per room ────────────────────
+
+_HAZARD_HINTS = ("spike", "spinner", "lightning", "killbox", "seeker", "fireball", "laser", "dust")
+_COLLECT_HINTS = ("strawberry", "berry", "heart", "cassette", "gem", "key", "tape")
+
+
+def _tile_runs_path(text: str, ox: float, oy: float) -> str:
+    """SVG path covering every non-empty tile, merged into horizontal runs."""
+    parts = []
+    for ty, row in enumerate(text.split("\n")):
+        tx = 0
+        n = len(row)
+        while tx < n:
+            if row[tx] in "0 ":
+                tx += 1
+                continue
+            start = tx
+            while tx < n and row[tx] not in "0 ":
+                tx += 1
+            parts.append(f"M{ox + start * 8:g} {oy + ty * 8:g}h{(tx - start) * 8}v8h-{(tx - start) * 8}z")
+    return "".join(parts)
+
+
+def _entity_color(name: str) -> str:
+    low = name.lower()
+    if name == "player":
+        return "#5dde6a"
+    if "refill" in low:
+        return "#a8f0a0"
+    if any(h in low for h in _HAZARD_HINTS):
+        return "#ff5a5a"
+    if any(h in low for h in _COLLECT_HINTS):
+        return "#ffd34d"
+    return "#c9c9d6"
+
+
+def _room_detail_svg(room: dict, rx: float, ry: float) -> str:
+    """Background tiles, solid tiles and entity markers for one room, in room coordinates."""
+    out = []
+    bg = cb.find_child(room, "bg")
+    if bg and bg.get("innerText"):
+        out.append(f'<path d="{_tile_runs_path(bg["innerText"], rx, ry)}" fill="#3a3a52" pointer-events="none"/>')
+    solids = cb.find_child(room, "solids")
+    if solids and solids.get("innerText"):
+        out.append(f'<path d="{_tile_runs_path(solids["innerText"], rx, ry)}" fill="#cfd6ea" pointer-events="none"/>')
+    ents = cb.find_child(room, "entities")
+    marks = []
+    for e in (ents or {}).get("__children", []):
+        name = e.get("__name", "")
+        try:
+            ex, ey = float(e.get("x", 0)), float(e.get("y", 0))
+            w, h = float(e.get("width", 0) or 0), float(e.get("height", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        color = _entity_color(name)
+        title = _html_escape(name)
+        if name == "cloud":  # 32x5 platform anchored at its top centre
+            ex, w, h = ex - 16, 32.0, 5.0
+            color = "#f2f2ff"
+        if w or h:
+            ww, hh = max(w, 2), max(h, 2)
+            if name.startswith("spikesUp"):
+                ey, hh = ey - 3, 3
+            elif name.startswith("spikesDown"):
+                hh = 3
+            elif name.startswith("spikesLeft"):
+                ex, ww = ex - 3, 3
+            elif name.startswith("spikesRight"):
+                ww = 3
+            marks.append(f'<rect x="{rx + ex:g}" y="{ry + ey:g}" width="{ww:g}" height="{hh:g}" fill="{color}" '
+                         f'fill-opacity="0.85"><title>{title}</title></rect>')
+        else:
+            marks.append(f'<circle cx="{rx + ex:g}" cy="{ry + ey:g}" r="3.5" fill="{color}" stroke="#111" '
+                         f'stroke-width="0.8"><title>{title}</title></circle>')
+    if marks:
+        out.append('<g class="em">' + "".join(marks) + "</g>")
+    return "".join(out)
+
+
+def _html_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
 @mcp.tool()
 def render_map_html(
     map_path: str,
     prefix: str = "",
     output_file: str = "",
+    detail: bool = True,
 ) -> str:
     """Render an interactive HTML map preview with zoom, pan, search, and detail panel.
 
@@ -1469,6 +1823,9 @@ def render_map_html(
         map_path: Path to the .bin file
         prefix: Only show rooms matching this prefix (e.g. "g-", "w-")
         output_file: Output HTML filename (default: map_preview.html in Temp/)
+        detail: Draw each room's solid/background tiles and entity markers
+            (hazards red, collectibles gold, spawns green, refills light green).
+            False draws room boxes only.
     """
     import json as _json
 
@@ -1565,8 +1922,12 @@ def render_map_html(
         })
 
         fs = max(10, min(20, rw // max(len(name), 1)))
-        cx = rx + rw / 2
-        cy = ry + rh / 2
+        if detail:
+            # Keep the room's layout visible: small labels in the top-left corner.
+            fs = min(fs, 12)
+            lx, ly, sy, anchor = rx + 5, ry + fs + 3, ry + fs + 3 + max(8, fs - 4) + 2, "start"
+        else:
+            lx, ly, sy, anchor = rx + rw / 2, ry + rh / 2 + fs * 0.35, ry + rh / 2 + fs + max(8, fs - 4), "middle"
         stroke = "#ffd700" if has_cp else "#5a5a7a"
         stroke_w = 3 if has_cp else 1.5
         badge_str = " ".join(badges)
@@ -1575,14 +1936,15 @@ def render_map_html(
 
         g_parts = [
             f'<rect class="rb" x="{rx}" y="{ry}" width="{rw}" height="{rh}" '
-            f'fill="{color}" fill-opacity="0.72" stroke="{stroke}" stroke-width="{stroke_w}" rx="4"/>',
+            f'fill="{color}" fill-opacity="{0.22 if detail else 0.72}" stroke="{stroke}" stroke-width="{stroke_w}" rx="4"/>',
+            _room_detail_svg(room, rx, ry) if detail else "",
             f'<rect class="rh" x="{rx}" y="{ry}" width="{rw}" height="{rh}" '
             f'fill="none" stroke="transparent" rx="4" pointer-events="none"/>',
-            f'<text class="ln" x="{cx:.1f}" y="{cy + fs*0.35:.1f}" '
-            f'text-anchor="middle" font-size="{fs}" fill="white" '
+            f'<text class="ln" x="{lx:.1f}" y="{ly:.1f}" '
+            f'text-anchor="{anchor}" font-size="{fs}" fill="white" '
             f'font-family="monospace" font-weight="bold" filter="url(#shadow)">{disp_label}</text>',
-            f'<text class="ls" x="{cx:.1f}" y="{cy + fs + max(8, fs-4):.1f}" '
-            f'text-anchor="middle" font-size="{max(8, fs-4)}" fill="#aab" '
+            f'<text class="ls" x="{lx:.1f}" y="{sy:.1f}" '
+            f'text-anchor="{anchor}" font-size="{max(8, fs-4)}" fill="#aab" '
             f'font-family="monospace" filter="url(#shadow)">{sub_label}</text>',
             f'<rect class="ri" x="{rx}" y="{ry}" width="{rw}" height="{rh}" '
             f'fill="transparent" data-idx="{i}"/>',
@@ -1722,7 +2084,7 @@ function zoomAt(cx, cy, f) {
   panY = cy - s * (cy - panY);
   zoom = nz; clamp(); apply();
 }
-fitToWindow(); apply();
+// first fitToWindow()/apply() runs at the end, once the minimap exists
 
 // ── mouse wheel ───────────────────────────────────────────────────────────
 wrap.addEventListener('wheel', e => {
@@ -1965,7 +2327,7 @@ mmC.addEventListener('click', e => {
   clamp(); apply();
 });
 
-drawMMViewport();
+fitToWindow(); apply();
 })();
 """
 
@@ -3661,17 +4023,20 @@ def analyze_room_connectivity(map_path: str) -> str:
         "",
     ]
 
+    def short(names):
+        return ", ".join(_short_room(n) for n in names)
+
     if result["hubs"]:
-        lines.append(f"  Hubs (3+ connections): {', '.join(result['hubs'])}")
+        lines.append(f"  Hubs (3+ connections): {short(result['hubs'])}")
     if result["dead_ends"]:
-        lines.append(f"  Dead ends (1 connection): {', '.join(result['dead_ends'])}")
+        lines.append(f"  Dead ends (1 connection): {short(result['dead_ends'])}")
     if result["isolated_rooms"]:
-        lines.append(f"  Isolated (0 connections): {', '.join(result['isolated_rooms'])}")
+        lines.append(f"  Isolated (0 connections): {short(result['isolated_rooms'])}")
 
     lines.append("\n  Adjacency:")
     for name, nbrs in result["adjacency"].items():
         if nbrs:
-            lines.append(f"    {name} → {', '.join(nbrs)}")
+            lines.append(f"    {_short_room(name)} → {short(nbrs)}")
 
     return "\n".join(lines)
 
@@ -5119,6 +5484,199 @@ _VANILLA_ENTITIES = frozenset({
     "coreMessage", "playbackTutorial", "playbackBillboard",
     "eventTrigger",
 })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  LIVE GAME LINK — Everest DebugRC (+ CelesteTAS) on the running game
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Everest serves a debug HTTP server (default http://localhost:32270) while the
+# game runs with debug mode on. These tools reload maps, teleport, read the
+# session and, when CelesteTAS is installed, play inputs to prove a room is
+# beatable. Override the address with LOENN_MCP_DEBUGRC.
+
+DEBUGRC = os.environ.get("LOENN_MCP_DEBUGRC", "http://localhost:32270").rstrip("/")
+_TAS_STATE = ("room={Level.Session.Level} deaths={Level.Session.Deaths} "
+              "dashes={Player.Dashes} state={Player.StateMachine.State}")
+
+
+def _rc(path: str, timeout: float = 30, **query) -> str:
+    """GET a DebugRC endpoint; raises RuntimeError with a readable message if the game is not reachable."""
+    url = DEBUGRC + path + ("?" + urllib.parse.urlencode(query) if query else "")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as exc:
+        raise RuntimeError(
+            f"Cannot reach the game's debug server at {DEBUGRC} ({exc}). Start Celeste with "
+            "Everest debug mode on, or set LOENN_MCP_DEBUGRC.") from exc
+
+
+def _rc_text(page: str) -> str:
+    """Visible text of a DebugRC HTML page, one item per line."""
+    body = page[page.find("<body"):] if "<body" in page else page
+    text = re.sub(r"<[^>]+>", "\n", body)
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&quot;", '"')
+    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
+
+
+def _map_sid(map_path: str) -> str:
+    """Everest SID of a workspace map: its path under Maps/ without the extension."""
+    p = _resolve(map_path)
+    try:
+        rel = p.relative_to(WORKSPACE / "Maps")
+    except ValueError:
+        rel = Path(map_path)
+    return rel.with_suffix("").as_posix()
+
+
+def _session() -> dict[str, str]:
+    fields = {}
+    for line in _rc("/session").splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            fields[k.strip()] = v.strip()
+    return fields
+
+
+@mcp.tool()
+def game_status() -> str:
+    """Where the running game is: map SID, side, room and player position."""
+    try:
+        s = _session()
+    except RuntimeError as exc:
+        return str(exc)
+    if not s.get("Area"):
+        return f"Game reachable at {DEBUGRC}, but no level is loaded."
+    return (f"Map: {s.get('Area')}  side {s.get('Side')}\n"
+            f"Room: {s.get('Level')}\nPosition: ({s.get('X')}, {s.get('Y')})")
+
+
+@mcp.tool()
+def game_reload_map(map_path: str, side: str = "A") -> str:
+    """Make the running game re-read a map after it was edited on disk.
+
+    Edits to an existing map are picked up; a brand-new map file is only
+    registered when the game restarts.
+
+    Args:
+        map_path: Path to the .bin file (relative to the workspace).
+        side: A, B or C.
+    """
+    sid = _map_sid(map_path)
+    try:
+        _rc("/reloadmap", area=sid, side=side)
+    except RuntimeError as exc:
+        return str(exc)
+    return f"Reload requested for {sid} ({side}-side)."
+
+
+@mcp.tool()
+def game_teleport(map_path: str, room: str, side: str = "A", x: int | None = None, y: int | None = None) -> str:
+    """Load a room of a map in the running game (a fresh debug session).
+
+    Args:
+        map_path: Path to the .bin file (relative to the workspace).
+        room: Room name, with or without 'lvl_'.
+        side: A, B or C.
+        x, y: Optional room-local position; the nearest spawn point is used.
+    """
+    sid = _map_sid(map_path)
+    q = {"area": sid, "side": side, "level": _short_room(room)}
+    if x is not None and y is not None:
+        q.update(x=x, y=y)
+    try:
+        _rc("/tp", **q)
+        time.sleep(1.5)
+        s = _session()
+    except RuntimeError as exc:
+        return str(exc)
+    if s.get("Area") != sid or s.get("Level") != _short_room(room):
+        return (f"Teleport sent, but the game reports {s.get('Area')} / {s.get('Level')}. "
+                "A map added since the game started needs a restart; check game_log for load errors.")
+    return f"In {sid} room {s.get('Level')} at ({s.get('X')}, {s.get('Y')})."
+
+
+@mcp.tool()
+def game_play_tas(map_path: str, room: str, inputs: str, intro_frames: int = 40,
+                  timeout_s: float = 60) -> str:
+    """Play CelesteTAS inputs from a room's spawn and report where the player ended up.
+
+    Use it to prove a room is beatable (or that a shortcut fails). Needs the
+    CelesteTAS mod. The script loads the room, waits `intro_frames` for the
+    spawn animation, then plays `inputs`, one `frames,keys` line each
+    (e.g. "20,R" / "14,R,J" / "1,R,U,X"; R L U D = directions, J = jump,
+    X = dash, G = grab). Hold a diagonal for ~6 frames after X so the dash
+    takes its direction; a second dash needs ~12+ frames after the first.
+
+    Args:
+        map_path: Path to the .bin file (relative to the workspace).
+        room: Room to start in.
+        inputs: TAS input lines.
+        intro_frames: Frames to wait after loading before inputs act.
+        timeout_s: Give up after this many seconds.
+    """
+    sid = _map_sid(map_path)
+    lines = [f"console load {sid} {_short_room(room)}", "   1"]
+    if intro_frames > 0:
+        lines.append(f"  {intro_frames}")
+    lines += [ln.strip() for ln in inputs.strip().splitlines() if ln.strip()]
+    import tempfile
+    tas = Path(tempfile.gettempdir()) / "loenn_mcp_game_play.tas"
+    tas.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    try:
+        _rc("/tas/custominfo", template=_TAS_STATE)
+        _rc("/tas/playtas", filePath=str(tas))
+        start = time.time()
+        started = False
+        info = ""
+        while time.time() - start < timeout_s:
+            time.sleep(0.5)
+            info = _rc_text(_rc("/tas/info"))
+            running = "Running: True" in info
+            cur = re.search(r"CurrentFrame: (\d+)", info)
+            tot = re.search(r"TotalFrames: (\d+)", info)
+            started |= running
+            done = cur and tot and int(tot.group(1)) > 0 and int(cur.group(1)) >= int(tot.group(1))
+            if started and (not running or done):
+                break
+            if not started and time.time() - start > 8:
+                return "CelesteTAS did not start the script. Is the CelesteTAS mod installed and enabled?"
+        else:
+            return f"Timed out after {timeout_s:.0f}s.\n" + info
+        _rc("/tas/sendhotkey", id="Start", action="press")  # stop playback
+    except RuntimeError as exc:
+        return str(exc)
+
+    pos = re.search(r"Pos:\s+([-\d.]+),\s*([-\d.]+)", info)
+    st = re.search(r"room=(\S*) deaths=(\d+) dashes=(.+?) state=", info)
+    if not (pos and st):
+        return "Played, but the game reported no player state:\n" + info[:800]
+    return (f"Played {len(lines) - 2} input lines from {sid} / {_short_room(room)}.\n"
+            f"  Ended in room: {st.group(1)}\n"
+            f"  Position:      ({float(pos.group(1)):.1f}, {float(pos.group(2)):.1f})\n"
+            f"  Deaths:        {st.group(2)}{'  (dead at the end)' if 'Dead' in info else ''}\n"
+            f"  Dashes left:   {st.group(3) if st.group(3).strip().isdigit() else '-'}")
+
+
+@mcp.tool()
+def game_log(lines: int = 400, only_problems: bool = True) -> str:
+    """Recent lines of the game's log.txt: errors, warnings and level loads.
+
+    Args:
+        lines: How many trailing log lines to scan.
+        only_problems: Keep only errors, warnings about missing events or
+            textures, failed map loads and level-load lines (default True).
+    """
+    root = _game_root()
+    log = root / "log.txt" if root else None
+    if not log or not log.exists():
+        return "Game log.txt not found (the workspace is not inside a Celeste install)."
+    tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+    if only_problems:
+        keep = re.compile(r"\[Error\]|Exception|Failed loading|Event not found|does not exist|LevelLoader")
+        tail = [l for l in tail if keep.search(l) and "CONFLICT" not in l]
+    return "\n".join(tail[-120:]) or "No problems in the scanned lines."
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

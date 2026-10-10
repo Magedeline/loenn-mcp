@@ -154,48 +154,67 @@ def encode_rle(text: str) -> bytes:
 # ─── Internal: Element I/O ────────────────────────────────────────────────────
 
 # Keys that are structural metadata, not serialized as element attributes.
-# NOTE: '_package' is intentionally NOT here — the root Map element stores
-# _package as a real attribute in the binary (separate from the raw package
-# string written before the lookup table). Skipping it would drop two strings
-# from the lookup table and omit the attribute, corrupting the file.
+# The root's '_package' key is handled separately in _write_element: it is
+# written as an attribute only when the file really had one (Lönn writes it),
+# never as a copy of the header package string.
 _SKIP_KEYS = frozenset(('__name', '__children'))
 
 
-def _read_value(r: BinaryReader, lookup: list[str]) -> Any:
+class Element(dict):
+    """A parsed element. Behaves exactly like a dict; `_bin` remembers how the
+    element was encoded (lookup indexes, value type tags, raw RLE bytes) so an
+    unedited map is written back byte-for-byte. It is an attribute, not a key,
+    so it never appears in items(), JSON exports or diffs."""
+
+    _bin: dict
+
+
+def _read_value(r: BinaryReader, lookup: list[str]) -> tuple[Any, int, Any]:
+    """Return (value, type tag, encoding detail needed to write it back unchanged)."""
     tag = r.read_byte()
     if tag == 0:
-        return r.read_byte() != 0
+        return r.read_byte() != 0, tag, None
     if tag == 1:
-        return r.read_byte()
+        return r.read_byte(), tag, None
     if tag == 2:
-        return r.read_short()
+        return r.read_short(), tag, None
     if tag == 3:
-        return r.read_int32()
+        return r.read_int32(), tag, None
     if tag == 4:
-        return r.read_float()
+        return r.read_float(), tag, None
     if tag == 5:
         idx = r.read_short()
-        return lookup[idx]
+        return lookup[idx], tag, idx
     if tag == 6:
-        return r.read_string()
+        return r.read_string(), tag, None
     if tag == 7:
         rle_len = r.read_short()
-        return decode_rle(r.read_bytes(rle_len))
+        raw = r.read_bytes(rle_len)
+        return decode_rle(raw), tag, raw
     raise ValueError(f"Unknown value type tag: {tag}")
 
 
-def _read_element(r: BinaryReader, lookup: list[str]) -> dict:
-    name = lookup[r.read_ushort()]
+def _read_element(r: BinaryReader, lookup: list[str]) -> Element:
+    name_idx = r.read_ushort()
+    element = Element(__name=lookup[name_idx])
+    enc = {'n': name_idx, 'k': {}, 't': {}, 'v': {}, 'r': {}}
 
     attr_count = r.read_byte()
-    element: dict[str, Any] = {'__name': name}
     for _ in range(attr_count):
-        key = lookup[r.read_ushort()]
-        element[key] = _read_value(r, lookup)
+        key_idx = r.read_ushort()
+        key = lookup[key_idx]
+        value, tag, detail = _read_value(r, lookup)
+        element[key] = value
+        enc['k'][key] = key_idx
+        enc['t'][key] = tag
+        if tag == 5:
+            enc['v'][key] = detail
+        elif tag == 7:
+            enc['r'][key] = detail
 
     child_count = r.read_ushort()
     element['__children'] = [_read_element(r, lookup) for _ in range(child_count)]
-
+    element._bin = enc
     return element
 
 
@@ -211,7 +230,77 @@ def _collect_strings(element: dict, seen: set[str]):
         _collect_strings(child, seen)
 
 
-def _write_value(w: BinaryWriter, key: str, value: Any, lookup: dict[str, int]):
+def _fits(tag: int, value: Any) -> bool:
+    """Can `value` still be written with the type tag it was read with?"""
+    is_int = isinstance(value, int) and not isinstance(value, bool)
+    if tag == 0:
+        return isinstance(value, bool)
+    if tag == 1:
+        return is_int and 0 <= value <= 255
+    if tag == 2:
+        return is_int and -32768 <= value <= 32767
+    if tag == 3:
+        return is_int and -2147483648 <= value <= 2147483647
+    if tag == 4:
+        return (is_int or isinstance(value, float))
+    return isinstance(value, str)
+
+
+class _Lookup:
+    """Append-only string table: existing indexes never move, new strings go at the end."""
+
+    def __init__(self, strings: list[str]):
+        self.strings = list(strings)
+        self._first: dict[str, int] = {}
+        for i, s in enumerate(self.strings):
+            self._first.setdefault(s, i)
+
+    def index(self, s: str) -> int:
+        if s not in self._first:
+            self._first[s] = len(self.strings)
+            self.strings.append(s)
+        return self._first[s]
+
+    def reuse(self, idx: int | None, s: str) -> int:
+        """Keep a recorded index when it still names the same string (handles duplicate entries)."""
+        if idx is not None and 0 <= idx < len(self.strings) and self.strings[idx] == s:
+            return idx
+        return self.index(s)
+
+    def get(self, s: str) -> int | None:
+        return self._first.get(s)
+
+
+def _write_original(w: BinaryWriter, tag: int, value: Any, lookup: _Lookup,
+                    vidx: int | None, raw: bytes | None) -> bool:
+    """Write `value` with its original encoding. Returns False if that is not possible."""
+    if tag == 7:
+        rle = raw if raw is not None and decode_rle(raw) == value else encode_rle(value)
+        if len(rle) > 32767:
+            return False
+        w.write_byte(7)
+        w.write_short(len(rle))
+        w.write_raw(rle)
+        return True
+    w.write_byte(tag)
+    if tag == 0:
+        w.write_byte(1 if value else 0)
+    elif tag == 1:
+        w.write_byte(value)
+    elif tag == 2:
+        w.write_short(value)
+    elif tag == 3:
+        w.write_int32(value)
+    elif tag == 4:
+        w.write_float(float(value))
+    elif tag == 5:
+        w.write_short(lookup.reuse(vidx, value))
+    elif tag == 6:
+        w.write_string(value)
+    return True
+
+
+def _write_value(w: BinaryWriter, key: str, value: Any, lookup: _Lookup):
     if isinstance(value, bool):
         w.write_byte(0)
         w.write_byte(1 if value else 0)
@@ -242,25 +331,29 @@ def _write_value(w: BinaryWriter, key: str, value: Any, lookup: dict[str, int]):
                 w.write_byte(6)
                 w.write_string(value)
         else:
-            idx = lookup.get(value)
-            if idx is not None:
-                w.write_byte(5)
-                w.write_short(idx)
-            else:
-                w.write_byte(6)
-                w.write_string(value)
+            # Celeste's own packer stores attribute strings in the lookup table.
+            w.write_byte(5)
+            w.write_short(lookup.index(value))
     else:
         w.write_byte(6)
         w.write_string(str(value))
 
 
-def _write_element(w: BinaryWriter, element: dict, lookup: dict[str, int]):
-    w.write_ushort(lookup[element.get('__name', '')])
+def _write_element(w: BinaryWriter, element: dict, lookup: _Lookup, is_root: bool = False):
+    enc = getattr(element, '_bin', None)
+    w.write_ushort(lookup.reuse(enc['n'] if enc else None, element.get('__name', '')))
 
     attrs = [(k, v) for k, v in element.items() if k not in _SKIP_KEYS]
+    if is_root and enc is not None and '_package' not in enc['t']:
+        # '_package' here only mirrors the header package; the file had no such attribute.
+        attrs = [(k, v) for k, v in attrs if k != '_package']
     w.write_byte(len(attrs))
     for key, value in attrs:
-        w.write_ushort(lookup[key])
+        w.write_ushort(lookup.reuse(enc['k'].get(key) if enc else None, key))
+        tag = enc['t'].get(key) if enc else None
+        if tag is not None and _fits(tag, value) and _write_original(
+                w, tag, value, lookup, enc['v'].get(key), enc['r'].get(key)):
+            continue
         _write_value(w, key, value, lookup)
 
     children = element.get('__children', [])
@@ -285,7 +378,11 @@ def read_map_bytes(data: bytes, expected_header: str = "CELESTE MAP") -> dict:
     lookup = [r.read_string() for _ in range(lookup_count)]
 
     root = _read_element(r, lookup)
-    root['_package'] = package
+    root._bin['lookup'] = lookup
+    root._bin['header_package'] = package
+    if '_package' not in root:
+        # Mirror the header package for display; it is not written back as an attribute.
+        root['_package'] = package
     return root
 
 
@@ -321,22 +418,38 @@ def _rotate_backups(path: Path, keep: int = BACKUP_KEEP):
 
 
 def serialize_map(data: dict, header: str = "CELESTE MAP") -> bytes:
-    """Serialize an element tree to Celeste .bin bytes (no file I/O)."""
-    seen: set[str] = set()
-    _collect_strings(data, seen)
+    """Serialize an element tree to Celeste .bin bytes (no file I/O).
 
-    strings = sorted(seen)
-    lookup = {s: i for i, s in enumerate(strings)}
+    A tree that came from read_map keeps its string table order and value
+    encodings, so unedited parts are written back byte-for-byte and edits
+    only append to the table.
+    """
+    enc = getattr(data, '_bin', None)
+    if enc is not None and 'lookup' in enc:
+        lookup = _Lookup(enc['lookup'])
+        if '_package' in enc['t']:
+            package = enc.get('header_package', '')
+        else:
+            package = data.get('_package', enc.get('header_package', ''))
+    else:
+        seen: set[str] = set()
+        _collect_strings(data, seen)
+        lookup = _Lookup(sorted(seen))
+        package = data.get('_package', '')
+
+    # Elements first: writing them may append new strings to the table.
+    body = BinaryWriter()
+    _write_element(body, data, lookup, is_root=True)
+    if len(lookup.strings) > 32767:
+        raise ValueError(f"String table too large ({len(lookup.strings)} entries)")
 
     w = BinaryWriter()
     w.write_string(header)
-    w.write_string(data.get('_package', ''))
-
-    w.write_ushort(len(strings))
-    for s in strings:
+    w.write_string(package)
+    w.write_ushort(len(lookup.strings))
+    for s in lookup.strings:
         w.write_string(s)
-
-    _write_element(w, data, lookup)
+    w.write_raw(body.get_bytes())
     return w.get_bytes()
 
 

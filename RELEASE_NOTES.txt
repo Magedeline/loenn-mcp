@@ -1,3 +1,52 @@
+loenn-mcp (unreleased, branch cel-upgrades)
+==========================================
+
+Lossless map writes:
+  - celeste_bin now writes an unedited map back byte-for-byte. It keeps the
+    original string-table order (including duplicate entries), each value's
+    type tag and the raw RLE tile data, and only appends new strings. Before,
+    46 of 72 real maps tested came out different after a plain read/write.
+  - Fixed: the header package string was stored under the same '_package'
+    key as Lönn's root '_package' attribute, so a rewrite added a stray
+    attribute (or overwrote the real one). The two are now kept apart.
+  - Parsed elements are a dict subclass carrying the encoding as an
+    attribute, so tools, JSON exports and diffs still see plain dicts.
+
+New tools:
+  - find_missing_definitions: namespaced entities/triggers placed in a map
+    that no Lönn plugin in the workspace or any installed mod defines.
+  - audit_plugin_coverage: C# [CustomEntity] names with no Lönn plugin and
+    plugins with no C# code; honours the .csproj compile list.
+  - validate_audio: checks every event:/ reference (map meta, rooms,
+    entities, triggers) against GUIDs.txt and the vanilla FMOD banks, with
+    closest-match suggestions.
+
+  - Live game link (Everest DebugRC, default http://localhost:32270, set
+    LOENN_MCP_DEBUGRC to change): game_status, game_reload_map,
+    game_teleport, game_log, and game_play_tas, which plays CelesteTAS
+    inputs from a room's spawn and reports the end room, position, deaths
+    and dashes. All return a plain message when the game is not running.
+
+Changed:
+  - render_map_html draws each room's solid and background tiles (merged
+    into horizontal runs, so a 123-room map stays about 2.4 MB) and entity
+    markers coloured by kind: hazards red, collectibles gold, spawns green,
+    refills light green, clouds at their real 32px width, everything else
+    grey, each with its name on hover. Room labels move to the top-left
+    corner so they do not cover the layout. detail=False keeps the old
+    box-only view.
+  - Fixed: the preview page crashed on load (the minimap was used before it
+    was created), leaving the map blank and the minimap empty.
+  - get_entity_definition accepts the placed name (e.g. "MyMod/CloudBoss");
+    list_entity_definitions filters on names too and scans subfolders.
+  - analyze_room_connectivity prints room names without the 'lvl_' prefix,
+    the way the game sees them.
+
+Tests:
+  - tests/ now has a unittest suite (python -m unittest discover -s tests).
+    Set LOENN_MCP_TEST_MAPS to a maps folder to round-trip real maps too.
+
+
 loenn-mcp v7.0.0
 ================
 

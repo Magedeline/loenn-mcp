@@ -28,7 +28,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 ## Features
 
-**75 MCP tools** for complete map manipulation, plus the `pcgscene` command-line tool for scripting and CI.
+**83 MCP tools** for complete map manipulation, plus the `pcgscene` command-line tool for scripting and CI.
 
 ### Core Tools
 
@@ -59,7 +59,9 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 - `list_stylegrounds` / `add_styleground` / `update_styleground` / `remove_styleground` — Manage map effects
 
 **Definitions & Catalog**
-- `list_entity_definitions` / `get_entity_definition` — Browse entity types
+- `list_entity_definitions` / `get_entity_definition` — Browse entity types; look a definition up by the name placed in maps (e.g. `MyMod/CloudBoss`)
+- `find_missing_definitions` — Namespaced entities/triggers in a map that no installed Lönn plugin defines
+- `audit_plugin_coverage` — C# `[CustomEntity]` names with no Lönn plugin, and plugins with no C# code (reads the .csproj compile list)
 - `list_trigger_definitions` / `get_trigger_definition` — Browse trigger types
 - `list_effect_definitions` / `get_effect_definition` — Browse effect types
 
@@ -87,6 +89,9 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 **Project Management**
 - `get_mod_info` — Project metadata and structure
 - `validate_map` / `batch_validate_and_fix` — Playability validation with auto-fix
+- `game_status` / `game_reload_map` / `game_teleport` / `game_log` — Drive the running game through Everest's debug server: see where you are, reload an edited map, jump to a room, read load errors
+- `game_play_tas` — Play CelesteTAS inputs from a room's spawn and report the room, position, deaths and dashes at the end: proof a room is beatable, or that a shortcut fails
+- `validate_audio` — Every audio event a map references, checked against GUIDs.txt and the game's FMOD banks, with closest-match suggestions
 - `export_room_json` / `import_room_json` — JSON room exchange
 
 **Diffing**
@@ -94,7 +99,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 ### Rendering
 
-- `render_map_html` — Interactive HTML preview (zoom, pan, search, minimap)
+- `render_map_html` — Interactive HTML map preview with tiles, colour-coded entity markers, zoom/pan, search and a minimap
 
 ### Procedural Generation
 
@@ -428,7 +433,7 @@ tools and the `anthropic` dependency were removed.
 
 **`celeste_bin.py`** — Standalone `.bin` parser
 - Pure Python (no Everest/Lönn required)
-- Full read/write round-trip with no data loss
+- Lossless read/write: an unedited map is written back byte-for-byte (string table order, value types and RLE data are preserved), and edits only append to the string table
 - Handles all 7 value types: bool, uint8, int16, int32, float32, lookup string, raw string, RLE-encoded string
 - Recursive element tree matching Lönn/Maple format
 
