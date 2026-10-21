@@ -1,6 +1,51 @@
 loenn-mcp (unreleased, branch cel-upgrades)
 ==========================================
 
+Phase 1 rework (7.1.0):
+
+Safety:
+  - Every map write keeps a timestamped backup outside the mod folder
+    (%LOCALAPPDATA%/loenn-mcp/backups, or LOENN_MCP_STATE_DIR) instead of
+    rolling .bak1..3 files next to the map, and each tool result names the
+    file written and its backup.
+  - Writes are refused while the map is open in an editor started here, or
+    open in the user's own Lönn. LOENN_MCP_PROTECT makes chosen maps
+    writable only through map_commit.
+  - New: map_copy, map_commit (dry run, whole map or chosen rooms, refuses
+    rooms that fail validation), map_backups, map_restore.
+  - New: map_diff, a semantic diff (rooms, geometry, tile cells, entities
+    and triggers by id, decals, stylegrounds, meta). Lönn re-encodes files on
+    save, so byte comparison is useless.
+
+Editors:
+  - New editor adapter layer (loenn_mcp/editors) with LoennAdapter and
+    RysyAdapter. editor_open launches Lönn on a map and room (room via
+    persistence.lastSelectedRoomName, isolated --storage-directory by
+    default), editor_wait reports the next completed save with its diff,
+    editor_status, editor_close. Verified with Lönn 1.0.10 on Windows.
+  - Removed install_loenn_manager / get_loenn_manager_source: the plugin
+    went to Loenn/plugins, which Lönn never loads, and called APIs that do
+    not exist.
+
+Assets (sprites first):
+  - check_sprites_xml: Sprites.xml parses, ids are unique, every Anim/Loop
+    has frames. check_assets: entity/trigger names have Lönn definitions,
+    decal and parallax textures exist. Textures come from the mod, every
+    installed mod and the vanilla atlas .meta files, case-insensitive like
+    the game.
+
+Sprite Fusion:
+  - sf_make_tileset writes a gray-box tileset + legend; sf_import turns a
+    Sprite Fusion JSON export into a room (new, or replace=true), matching
+    tiles by pixels because export ids index the exported sheet.
+
+Other:
+  - Tool descriptions are trimmed to one paragraph (parameter docs stay);
+    18 extra tools are hidden unless LOENN_MCP_TOOLS=all.
+  - Placement checks no longer flag bottom-anchored entities (player,
+    spring) standing exactly on the floor line.
+  - README tool reference is generated: python tools/gen_tool_reference.py
+
 Lossless map writes:
   - celeste_bin now writes an unedited map back byte-for-byte. It keeps the
     original string-table order (including duplicate entries), each value's

@@ -9,6 +9,9 @@ import types
 import unittest
 from pathlib import Path
 
+# Keep timestamped backups and editor storage out of the real state folder.
+os.environ.setdefault("LOENN_MCP_STATE_DIR", tempfile.mkdtemp(prefix="loenn-mcp-test-state-"))
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:
@@ -347,7 +350,9 @@ class Tools(unittest.TestCase):
 
         out = s.merge_json_into_map('Maps/test.bin', plan, dry_run=False, preview=False)
         self.assertIn('Written', out)
-        self.assertTrue((self.ws / 'Maps' / 'test.bin.bak1').exists())
+        self.assertIn('[saved Maps/test.bin', out)
+        backups = s.safety.list_backups(self.ws / 'Maps' / 'test.bin', s.WORKSPACE)
+        self.assertEqual(backups[0].read_bytes(), self.raw)  # timestamped copy of the original
         again = s.merge_json_into_map('Maps/test.bin', plan, preview=False)
         self.assertIn('id=43', again)  # 42 is taken now
 

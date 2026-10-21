@@ -7,6 +7,9 @@ import types
 import unittest
 from pathlib import Path
 
+# Keep timestamped backups and editor storage out of the real state folder.
+os.environ.setdefault("LOENN_MCP_STATE_DIR", tempfile.mkdtemp(prefix="loenn-mcp-test-state-"))
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 try:

@@ -14,6 +14,10 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 ## Contents
 
 - [Features](#features)
+- [Safety: backups, copies and commits](#safety-backups-copies-and-commits)
+- [Opening maps in Lönn](#opening-maps-in-lönn)
+- [Sprite Fusion gray-box rooms](#sprite-fusion-gray-box-rooms)
+- [Tool reference](#tool-reference)
 - [Installation & setup](#installation--setup)
 - [JSON round-trip & authoring](#json-round-trip--authoring)
 - [`pcgscene` CLI](#pcgscene-cli)
@@ -29,7 +33,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 ## Features
 
-**88 MCP tools** for complete map manipulation, plus the `pcgscene` command-line tool for scripting and CI.
+MCP tools for complete map manipulation (full list in the [tool reference](#tool-reference)), plus the `pcgscene` command-line tool for scripting and CI. Every write keeps a timestamped backup, maps open in Lönn are protected from MCP writes, and gray-box rooms painted in Sprite Fusion import directly.
 
 ### Core Tools
 
@@ -119,6 +123,317 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 - `generate_map_from_image` — Convert color-mapped images to playable maps
 - `generate_terrain_map` — Procedural maps with Perlin noise + Voronoi biomes
 - `preview_terrain_biomes` — Preview biome layout before generation
+
+---
+
+## Safety: backups, copies and commits
+
+No map is overwritten silently.
+
+- **Every write keeps a timestamped backup** before the file is replaced, in a backup store outside the mod folder
+  (so Everest never loads it and the mod's git stays clean):
+  `%LOCALAPPDATA%\loenn-mcp\backups\<mod>\<path>\<name>.<YYYYMMDD-HHMMSS-micro>.bin`.
+  Each tool result ends with a line naming the file written and its backup.
+- New bytes are re-parsed before anything is replaced, then written to a temp file and swapped in atomically.
+- **Copy first** for chapter maps: `map_copy`, edit the copy, `map_diff`, then `map_commit` (dry run first; can take
+  only some rooms; refuses rooms that fail validation, such as rooms without a player spawn).
+- `LOENN_MCP_PROTECT` (glob list, `;`-separated, relative to the mod) makes matching maps read-only except through
+  `map_commit`. Recommended for CEL:
+  `Maps/CEL/Area/*.bin;Maps/CEL/BSide/*.bin;Maps/CEL/CSide/*.bin;Maps/CEL/DSide/*.bin;Maps/CEL/ZSide/*.bin`.
+- Writes are refused while the map is open in an editor started with `editor_open`, or open in your own Lönn,
+  because Lönn's next save would overwrite them.
+- `map_backups` lists backups, `map_restore` puts one back (backing up the current file first).
+- `map_diff` compares meaning, not bytes: rooms, geometry, fg/bg tile cells, entities and triggers by id, decals,
+  stylegrounds and metadata. Lönn re-encodes the whole file on save, so a byte diff says nothing useful.
+
+Round trips are tested. To check every map in a folder (.bin to tree to .bin, and .bin to typed JSON to .bin,
+both byte-identical):
+
+```bash
+LOENN_MCP_TEST_MAPS="<Maps folder>" python -m unittest discover -s tests -k RealMaps
+```
+
+## Opening maps in Lönn
+
+`editor_open(map, room)` starts Lönn on that map and room. `editor_wait` blocks until you save (and reports the
+semantic diff of that save) or close Lönn. `editor_close` closes it, asking Lönn first; `force` kills it.
+
+What this relies on, read from Lönn 1.0.10's source and tested on Windows:
+
+| Mechanism | Behaviour |
+|---|---|
+| `Lönn.exe <map.bin>` | Opens that map instead of the last one. |
+| `--storage-directory <dir>` | Uses `<dir>` for settings, persistence, backups and plugin settings. The MCP uses an isolated copy (`%LOCALAPPDATA%\loenn-mcp\loenn-storage`, seeded from your settings and plugin settings), so your recent files are untouched. `storage="user"` uses your normal Lönn folder. |
+| Room selection | No command-line option exists. Lönn selects `persistence.lastSelectedRoomName` on load, so the MCP writes that key (and the camera) before launch. |
+| Detecting a finished edit | Lönn saves to `<map>.bin.saving`, verifies it, then renames it over the map. The MCP watches the map's size, mtime and hash, ignores it while `.saving` exists, and only counts bytes that parse. |
+| Reloading in a running Lönn | Not possible: Lönn has no IPC or single-instance lock. Close and reopen (`editor_close`, then `editor_open`). |
+
+The editor side is an adapter (`loenn_mcp/editors`): `LoennAdapter` today, and `RysyAdapter` launches Rysy
+(`--map`) with the same watching, so the tool surface can move to a Rysy-based setup unchanged.
+
+## Sprite Fusion gray-box rooms
+
+Paint gray-box rooms in [Sprite Fusion](https://www.spritefusion.com/) and import them as Celeste rooms.
+
+1. `sf_make_tileset()` writes `celeste_graybox.png`, a legend and a README to `%LOCALAPPDATA%\loenn-mcp\sprite-fusion`.
+2. In Sprite Fusion, import `celeste_graybox.png` with tile size 16. Make the map 40x23 cells for one screen
+   (one cell = one 8x8 Celeste tile). Paint ground on a layer with **Collider** on, background walls on a layer
+   named `bg`, and player, spikes, spring, refill, strawberry, jump-through or dream block anywhere.
+3. Export as JSON (`map.zip`), then call `sf_import(export_path, map_path, room, output_path=...)`, dry run first.
+
+Details:
+- Tile ids in an export index the exported spritesheet, so tiles are matched to the tileset **by pixels**
+  (needs Pillow), falling back to ids.
+- Spikes and jump-throughs merge along runs, dream blocks into rectangles. Entities get their Lönn defaults.
+- Only entities with a Lönn definition are placed (sprites first). A tile can carry Sprite Fusion attributes
+  `entity`, `anchor` and entity data to place another entity; unknown names are refused.
+- Tiles on non-collider layers that are not in the tileset are decoration and are ignored, with a count in the
+  report: decorate in Lönn after the gray-box plays well.
+- A new room is added (default: to the right of the existing rooms). An existing room changes only with
+  `replace=true`, which swaps its fg/bg tiles and entities and keeps triggers, decals and settings.
+- A custom legend (`legend_path`) can map your own tileset's tiles to kinds and foreground tile characters.
+
+## Tool reference
+
+<!-- tools:start -->
+
+99 tools; 81 are listed by default. Tools marked *extra* are hidden unless `LOENN_MCP_TOOLS=all`. Generated by `tools/gen_tool_reference.py`.
+
+#### Map Reading Tools
+
+| Tool | What it does |
+|---|---|
+| `list_maps` | List all .bin map files in the project. |
+| `read_map_overview` | Parse a .bin map file and return a summary of rooms and structure. |
+| `read_room` | Get detailed data for a specific room: tiles, entities, triggers. |
+| `get_room_tiles` | Get the complete tile grid for a room as text. |
+
+#### Map Editing Tools
+
+| Tool | What it does |
+|---|---|
+| `add_entity` | Add an entity to a room and save the map. |
+| `remove_entity` | Remove an entity from a room by its ID. |
+| `add_trigger` | Add a trigger to a room and save the map. |
+| `remove_trigger` | Remove a trigger from a room by its ID. |
+| `set_room_tiles` | Set tile data for a room. Each row is a line of characters ('0'=air). |
+| `add_room` | Add a new empty room to a map. |
+| `remove_room` | Remove a room from a map. |
+| `create_map` | Create a new empty Celeste .bin map file. |
+
+#### Styleground Tools
+
+| Tool | What it does |
+|---|---|
+| `list_stylegrounds` | List all stylegrounds (foreground + background effects) in a map. |
+| `add_styleground` | Add a styleground effect to a map. |
+| `remove_styleground` | Remove a styleground from a map by its index in the layer. |
+| `update_styleground` | Merge properties into an existing styleground without replacing it. |
+
+#### Entity / Trigger Catalog Tools
+
+| Tool | What it does |
+|---|---|
+| `list_entity_definitions` | List available Lönn entity definitions from the project. |
+| `get_entity_definition` | Read a Lönn entity Lua definition and extract its properties. |
+| `list_trigger_definitions` | List available Lönn trigger definitions. |
+| `list_effect_definitions` | List available Lönn effect definitions. |
+| `find_missing_definitions` | List namespaced entities and triggers in a map that no installed Lönn plugin defines. |
+| `audit_plugin_coverage` | Compare the mod's C# [CustomEntity] names with its Lönn plugin definitions. |
+| `validate_audio` | Check every audio event a map references against the sound banks. |
+
+#### Analysis Tools
+
+| Tool | What it does |
+|---|---|
+| `analyze_map` | Get detailed statistics about a map file. |
+| `visualize_map_layout` *(extra)* | Generate an ASCII visualization of all room positions in a map. |
+
+#### Map Preview Tools
+
+| Tool | What it does |
+|---|---|
+| `preview_map_section` | Generate an ASCII preview of a map section, like a Lönn mini-map. |
+| `render_map_html` | Render an interactive HTML map preview with zoom, pan, search, and detail panel. |
+
+#### Procedural Generation Tools
+
+| Tool | What it does |
+|---|---|
+| `build_pattern_library` *(extra)* | Scan local .bin maps and extract room patterns into a reusable library. |
+| `generate_room_from_pattern` *(extra)* | Generate a new room using patterns from the library and a randomness strategy. |
+| `validate_room` | Check a room for common playability problems. |
+| `ingest_external_map` *(extra)* | Download a Celeste map from an external URL and extract room patterns. |
+
+#### Image-To-Map And Terrain Generation Tools
+
+| Tool | What it does |
+|---|---|
+| `generate_map_from_image` *(extra)* | Convert a color-mapped image into a full playable Celeste map. |
+| `generate_terrain_map` *(extra)* | Generate a procedural Celeste map using Perlin noise and Voronoi biomes. |
+| `preview_terrain_biomes` *(extra)* | Preview the biome layout for a terrain generation without creating the map. |
+
+#### Map Reading Extensions
+
+| Tool | What it does |
+|---|---|
+| `read_map_metadata` | Read high-level metadata from a map without listing all room contents. |
+| `search_entities` | Search for entities across all rooms (or a specific room) by type and/or position. |
+| `search_triggers` | Search for triggers across all rooms by type. |
+| `compare_rooms` | Compare two rooms in the same map side-by-side. |
+
+#### Map Editing Extensions
+
+| Tool | What it does |
+|---|---|
+| `update_entity` | Update properties of an existing entity by ID. |
+| `move_entity` | Move an entity to a new position. |
+| `update_room` | Update room-level properties (music, dark, wind, etc.). |
+| `clone_room` | Clone an existing room to a new name and position. |
+| `batch_add_entities` | Add multiple entities to a room in one call. |
+
+#### Decals
+
+| Tool | What it does |
+|---|---|
+| `list_decals` | List all decals in a room (foreground or background). |
+| `add_decal` | Add a decal to a room. |
+| `remove_decal` | Remove a decal by index. |
+
+#### Advanced Analysis
+
+| Tool | What it does |
+|---|---|
+| `analyze_entity_usage` *(extra)* | Analyze entity usage across the entire map. |
+| `analyze_difficulty` | Estimate room or map difficulty from hazard density, nav aids, and tile coverage. |
+| `find_entity_references` *(extra)* | Find all occurrences of an entity type across the map. |
+| `detect_map_patterns` *(extra)* | Detect gameplay design archetypes (linear, hub, collectible-rich, etc.). |
+| `analyze_room_connectivity` | Analyze room adjacency graph showing isolated rooms, dead ends, and hubs. |
+
+#### Suggestions
+
+| Tool | What it does |
+|---|---|
+| `suggest_improvements` *(extra)* | Suggest improvements for a room based on analysis. |
+| `compare_maps` *(extra)* | Compare two maps and show structural differences. |
+
+#### Wiki / Cache
+
+| Tool | What it does |
+|---|---|
+| `wiki_save` *(extra)* | Save analysis results or notes to the local wiki cache. |
+| `wiki_search` *(extra)* | Search the wiki cache by key, content, or tags. |
+| `wiki_list` *(extra)* | List all entries in the wiki cache. |
+| `wiki_get` *(extra)* | Retrieve a specific wiki entry by key. |
+
+#### Mod Project
+
+| Tool | What it does |
+|---|---|
+| `get_mod_info` | Get information about the current mod project. |
+| `validate_map` | Validate an entire map for playability issues. |
+
+#### Catalog Extensions
+
+| Tool | What it does |
+|---|---|
+| `get_trigger_definition` | Read the source of a Lönn trigger definition .lua file. |
+| `get_effect_definition` | Read the source of a Lönn effect definition .lua file. |
+
+#### Import / Export
+
+| Tool | What it does |
+|---|---|
+| `export_room_json` | Export a room as a JSON file for external editing or sharing. |
+| `import_room_json` | Import a room from a JSON file into a map. |
+
+#### Diff & Fix
+
+| Tool | What it does |
+|---|---|
+| `summarize_map_diff` *(extra)* | Create or compare a structural snapshot of the map. |
+| `batch_validate_and_fix` | Validate all rooms in a map and optionally auto-fix issues. |
+
+#### Room Settings
+
+| Tool | What it does |
+|---|---|
+| `get_room_settings` | Get all editable settings for a room (music, physics, wind, camera, flags). |
+| `update_room_settings` | Update room settings (music, physics, wind, camera, flags) by merging a JSON object. |
+| `rename_room` | Rename a room in a map. |
+| `move_room` | Move a room to a new world-space position. |
+| `resize_room` | Resize a room (snaps to 8-pixel grid, preserves tile data). |
+
+#### Map Metadata & Dependency Settings
+
+| Tool | What it does |
+|---|---|
+| `get_map_metadata` | Read the map-level metadata block (Everest/celeste.yaml meta settings). |
+| `set_map_metadata` | Set map-level metadata properties (Everest meta block). |
+| `replace_audio_event` | Find and replace an FMOD audio event path anywhere in a map. |
+| `get_map_dependencies` | Read the mod dependencies list from a map's everest.yaml or meta node. |
+| `set_map_dependencies` | Write or update the mod dependency list in the map's everest.yaml. |
+
+#### Ml Asset Analysis
+
+| Tool | What it does |
+|---|---|
+| `analyze_map_assets` *(extra)* | ML-style analysis of a map's assets against the Maddie480 graphics dump. |
+
+#### Json Round-Trip And Authoring
+
+| Tool | What it does |
+|---|---|
+| `map_to_json` | Convert a .bin map to typed JSON that converts back byte-identical. |
+| `json_to_map` | Convert typed JSON (from map_to_json, possibly edited) back to a .bin map. |
+| `check_authoring_json` | Resolve authoring JSON without a map: show each object with its defaults filled in from the Lönn definitions, and flag unknown names. |
+| `merge_json_into_map` | Add entities, triggers and rooms from authoring JSON to an existing map. |
+| `run_author_script` | Run a JavaScript authoring script (js/ package, lucid-dream style) and use its output. |
+
+#### Live Game Link
+
+| Tool | What it does |
+|---|---|
+| `game_status` | Where the running game is: map SID, side, room and player position. |
+| `game_reload_map` | Make the running game re-read a map after it was edited on disk. |
+| `game_teleport` | Load a room of a map in the running game (a fresh debug session). |
+| `game_play_tas` | Play CelesteTAS inputs from a room's spawn and report where the player ended up. |
+| `game_log` | Recent lines of the game's log.txt: errors, warnings and level loads. |
+
+#### Safety: Copies, Commits, Backups, Diff
+
+| Tool | What it does |
+|---|---|
+| `map_copy` | Copy a map to a working copy so edits never touch the original. Default target: Maps/<mod>/wip/<name>.copy.bin. |
+| `map_commit` | Apply a working copy to the real map: whole file, or only the listed rooms. Dry run shows the diff first. |
+| `map_backups` | List the timestamped backups of a map, newest first. |
+| `map_restore` | Restore a map from one of its backups (the current file is backed up first). |
+| `map_diff` | Semantic diff of two maps: rooms, geometry, fg/bg tiles, entities, triggers, decals, stylegrounds, meta. |
+
+#### Assets
+
+| Tool | What it does |
+|---|---|
+| `check_assets` | Check that a map only uses things that exist: entity/trigger names with a Lönn definition, decal and parallax textures. |
+| `check_sprites_xml` | Check a Sprites.xml: it parses, ids are unique, and every Anim/Loop has frames in the atlas. Check this first when a sprite does not show in game. |
+
+#### Editors
+
+| Tool | What it does |
+|---|---|
+| `editor_open` | Open a map in Lönn (or Rysy), optionally on a room. MCP writes to that map are refused until it closes. |
+| `editor_wait` | Wait until the user saves in the editor (or it closes), then report what changed. Call again to keep waiting. |
+| `editor_status` | List editor sessions from this server and any other running Lönn. |
+| `editor_close` | Close an editor session. Without force, the editor may ask about unsaved changes and stay open. |
+
+#### Sprite Fusion
+
+| Tool | What it does |
+|---|---|
+| `sf_make_tileset` | Write the Celeste gray-box tileset for Sprite Fusion (PNG, legend JSON, README). |
+| `sf_import` | Import a Sprite Fusion JSON export (map.zip) as a Celeste room: solid/bg tiles plus gray-box entities. |
+
+<!-- tools:end -->
 
 ---
 
@@ -220,7 +535,7 @@ Every attribute keeps its binary type, so the round trip is byte-identical:
 - **Refusals.** `json_to_map` writes nothing if a value does not fit its type
   (`["u8", 300]`), if an *unedited* dump would not reproduce its source byte-for-byte
   (checked with `source.sha256`), or if the output would not read back as the same
-  map. Writes are atomic (temp file + replace) with rolling `.bak` copies.
+  map. Writes are atomic (temp file + replace) and keep a timestamped backup (see Safety).
 - Hand-written documents may skip `lookup`/`source` and give bare values
   (`"x": 8`); those get the type Celeste's own packer would pick.
 
@@ -578,6 +893,13 @@ tools and the `anthropic` dependency were removed.
 | `LOENN_MCP_LOENN` | (shipped table) | A Lönn install (folder with `Lönn.exe`, or its `src/`) to read vanilla entity/trigger defaults from, instead of `loenn_mcp/data/vanilla_defs.json` |
 | `LOENN_MCP_NODE` | `node` on PATH | Node.js executable for `run_author_script` |
 | `LOENN_MCP_AUTHOR_CLI` | bundled `js/bin/loenn-author.js` | Alternative authoring CLI |
+| `LOENN_MCP_STATE_DIR` | `%LOCALAPPDATA%\loenn-mcp` | Backups, isolated Lönn storage, Sprite Fusion tileset |
+| `LOENN_MCP_PROTECT` | (none) | `;`-separated globs of maps that only `map_commit` may change |
+| `LOENN_MCP_TOOLS` | `core` | `all` also lists the extra analysis and older generator tools |
+| `LOENN_MCP_LOENN_STORAGE` | `isolated` | Default Lönn storage for `editor_open` (`isolated` or `user`) |
+| `LOENN_EXE` | Olympus' `Lönn.exe` | Lönn executable |
+| `RYSY_EXE` | newest `Rysy.exe` under `Documents\GitHub\Rysy` | Rysy executable |
+| `LOENN_MCP_DEBUGRC` | `http://localhost:32270` | Everest debug server for the `game_*` tools |
 
 ---
 
@@ -641,6 +963,16 @@ tools and the `anthropic` dependency were removed.
 - Atomic map writes
 - Explicit download confirmation
 
+**`safety.py`** — write policy: guards, timestamped backup store, per-call write report
+
+**`mapdiff.py`** — semantic diff of two maps (rooms, tiles, entities by id, decals, stylegrounds, meta)
+
+**`editors/`** — `EditorAdapter` with save watching; `LoennAdapter` (launch, room preselect, isolated storage), `RysyAdapter`
+
+**`assets.py`** — texture index (mod, installed mods, vanilla atlas `.meta`), Sprites.xml and map asset checks
+
+**`sprite_fusion.py`** — gray-box tileset, Sprite Fusion export reader, pixel matching, conversion to rooms
+
 **`cli.py`** — `pcgscene` command-line tool
 - scan / score / validate / fix / diff, all `--json`-capable
 - Shares `celeste_bin`'s atomic-write path — no separate write logic to drift
@@ -651,7 +983,7 @@ tools and the `anthropic` dependency were removed.
 
 - Python 3.9+
 - `fastmcp >= 3.0.0`
-- `Pillow >= 9.0` (optional, for image-to-map conversion)
+- `Pillow >= 9.0` (optional: image-to-map conversion, and pixel matching for Sprite Fusion imports)
 - Node.js 14+ (optional, only for JavaScript authoring scripts)
 
 Install with all optional features:

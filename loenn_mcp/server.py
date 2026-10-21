@@ -35,7 +35,10 @@ Tools (categories):
                     validate_room, ingest_external_map
   Image/Terrain:    generate_map_from_image, generate_terrain_map,
                     preview_terrain_biomes
-  Lönn Manager:     install_loenn_manager, get_loenn_manager_source
+  Safety:           map_copy, map_commit, map_backups, map_restore, map_diff
+  Editors:          editor_open, editor_wait, editor_status, editor_close
+  Assets:           check_assets, check_sprites_xml
+  Sprite Fusion:    sf_make_tileset, sf_import
 
 All tools are deterministic/procedural — no AI models, no network calls to
 LLM APIs. (The former ai_* tools were removed in v7.0.0.)
@@ -47,6 +50,8 @@ Usage:
 
 import difflib
 import fnmatch
+import functools
+import inspect
 import io
 import json
 import os
@@ -71,6 +76,7 @@ try:
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
+    from . import safety, mapdiff, assets, sprite_fusion, editors
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import map_json                          # run directly from source
@@ -80,39 +86,87 @@ except ImportError:
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
     import gdep_tools                        # run directly from source
+    import safety, mapdiff, assets, sprite_fusion, editors
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
 mcp = FastMCP(
     "loenn-mcp",
     instructions=(
-        "Celeste / Lönn Map Editor MCP — read, edit, analyze, and "
-        "procedurally generate Celeste .bin map files. "
-        "Use build_pattern_library to extract room patterns from existing maps, "
-        "generate_room_from_pattern to create new rooms with a chosen strategy "
-        "(balanced/exploration/challenge/speedrun) and optional seed, "
-        "validate_room to check basic playability, and "
-        "ingest_external_map to import and attribute maps from external URLs "
-        "such as GameBanana mod downloads. "
-        "Room settings (music, dark/space/wind/physics) can be read and written "
-        "with get_room_settings / update_room_settings. "
-        "Map-wide metadata (wipe type, intro, color grade) uses "
-        "get_map_metadata / set_map_metadata — pass subpath (e.g. "
-        "\"mode/audiostate\") to reach nested per-side audio overrides "
-        "such as Music/AltMusic/AmbienceProgress that live below meta. "
-        "To rename or fix an FMOD audio event across an entire map in one "
-        "call — metadata, every room, and entities with their own audio "
-        "override — use replace_audio_event instead of editing rooms one "
-        "at a time. "
-        "Mod dependencies are managed with get_map_dependencies / "
-        "set_map_dependencies (writes everest.yaml). "
-        "Use analyze_map_assets for ML-powered asset validation against the "
-        "Maddie480 graphics dump (maddie480.ovh/celeste/graphics-dump-browser) "
-        "and the CelestialCartographers/Loenn entity catalog. "
-        "Use install_loenn_manager to deploy the Lönn plugin that bridges "
-        "Lönn ↔ MCP for live two-way map editing."
+        "Reads and writes Celeste .bin maps directly (lossless), no editor needed. "
+        "Paths are relative to the mod folder (LOENN_MCP_WORKSPACE). "
+        "Read: list_maps, read_map_overview, read_room, get_room_tiles, search_entities, list_decals. "
+        "Edit: add/update/move/remove entity and trigger, set_room_tiles, add/remove/move/resize/clone room, "
+        "merge_json_into_map for many additions at once (dry run first). "
+        "Safety: every write keeps a timestamped backup (map_backups, map_restore). For chapter maps, "
+        "map_copy, edit the copy, map_diff, then map_commit. "
+        "Check: validate_map, check_assets (names and textures exist), check_sprites_xml. "
+        "Editor: editor_open opens a map (and room) in Lönn, editor_wait returns when the user saved; "
+        "writes to a map that is open in an editor are refused. "
+        "Gray-box rooms painted in Sprite Fusion come in with sf_import (tileset from sf_make_tileset). "
+        "Game: game_teleport, game_reload_map, game_play_tas need Celeste running with Everest debug mode."
     ),
 )
+
+
+# ─── Tool registration, write reporting and safe saves ────────────────────────
+
+# Tools hidden unless LOENN_MCP_TOOLS=all: analysis extras and older generators
+# that crowd the list for an agent doing map edits.
+_EXTRA_TOOLS = {
+    "wiki_save", "wiki_search", "wiki_list", "wiki_get", "generate_terrain_map", "preview_terrain_biomes",
+    "generate_map_from_image", "ingest_external_map", "build_pattern_library", "generate_room_from_pattern",
+    "analyze_map_assets", "detect_map_patterns", "suggest_improvements", "summarize_map_diff", "compare_maps",
+    "analyze_entity_usage", "find_entity_references", "visualize_map_layout",
+}
+_DESC_LIMIT = 400
+
+
+def _short_doc(doc: str | None) -> str | None:
+    """Keep the first paragraph (capped) and the Args section, which FastMCP turns into parameter docs."""
+    if not doc:
+        return doc
+    text = inspect.cleandoc(doc)
+    head, _, rest = text.partition("\n\n")
+    head = " ".join(head.split())
+    if len(head) > _DESC_LIMIT:
+        head = head[:_DESC_LIMIT].rsplit(" ", 1)[0] + " ..."
+    m = re.search(r"^(Args|Arguments|Parameters):\s*$.*", text, re.M | re.S)
+    return head + ("\n\n" + m.group(0) if m else "")
+
+
+def tool(*dargs, **dkw):
+    """mcp.tool() plus: short descriptions, guard refusals as clear errors, and a
+    "[saved ...; backup ...]" line for every map written during the call."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            safety.begin_call()
+            try:
+                result = fn(*args, **kwargs)
+            except safety.WriteBlocked as exc:
+                safety.end_call()
+                return f"Not written: {exc}"
+            except editors.EditorError as exc:
+                safety.end_call()
+                return f"Editor error: {exc}"
+            records = safety.end_call()
+            if records and isinstance(result, str):
+                result += "\n" + safety.describe_records(records, WORKSPACE)
+            return result
+        wrapper.__doc__ = _short_doc(fn.__doc__)
+        mcp.tool(*dargs, **dkw)(wrapper)
+        return wrapper
+    return deco
+
+
+def _save(path, data: dict) -> "safety.WriteRecord":
+    """Write an element tree: guards, timestamped backup, validate, atomic replace."""
+    return safety.save_map(Path(path), data, WORKSPACE)
+
+
+def _save_bytes(path, payload: bytes, header: str = "CELESTE MAP") -> "safety.WriteRecord":
+    return safety.save_bytes(Path(path), payload, WORKSPACE, header)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -153,7 +207,7 @@ def _next_entity_id(room: dict) -> int:
 #  MAP READING TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@tool()
 def list_maps(subdir: str = "Maps") -> str:
     """List all .bin map files in the project.
 
@@ -181,7 +235,7 @@ def list_maps(subdir: str = "Maps") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def read_map_overview(map_path: str) -> str:
     """Parse a .bin map file and return a summary of rooms and structure.
 
@@ -229,7 +283,7 @@ def read_map_overview(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def read_room(map_path: str, room_name: str) -> str:
     """Get detailed data for a specific room: tiles, entities, triggers.
 
@@ -310,7 +364,7 @@ def read_room(map_path: str, room_name: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def get_room_tiles(map_path: str, room_name: str, layer: str = "fg") -> str:
     """Get the complete tile grid for a room as text.
 
@@ -342,7 +396,7 @@ def get_room_tiles(map_path: str, room_name: str, layer: str = "fg") -> str:
 #  MAP EDITING TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@tool()
 def add_entity(
     map_path: str,
     room_name: str,
@@ -403,7 +457,7 @@ def add_entity(
     entity.update({k: v for k, v in props.items() if k not in _protected})
 
     ent_el["__children"].append(entity)
-    cb.write_map(path, data)
+    _save(path, data)
 
     return (
         f"Added '{entity_name}' (id={entity_id}) at ({x},{y}) "
@@ -411,7 +465,7 @@ def add_entity(
     )
 
 
-@mcp.tool()
+@tool()
 def remove_entity(map_path: str, room_name: str, entity_id: int) -> str:
     """Remove an entity from a room by its ID.
 
@@ -438,11 +492,11 @@ def remove_entity(map_path: str, room_name: str, entity_id: int) -> str:
     if len(ent_el["__children"]) == before:
         return f"Entity id={entity_id} not found."
 
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Removed entity id={entity_id} from '{room_name}'."
 
 
-@mcp.tool()
+@tool()
 def add_trigger(
     map_path: str,
     room_name: str,
@@ -530,7 +584,7 @@ def add_trigger(
     trigger.update({k: v for k, v in props.items() if k not in _protected})
 
     trig_el["__children"].append(trigger)
-    cb.write_map(path, data)
+    _save(path, data)
 
     suffix = f" with {len(node_children)} node(s)" if node_children else ""
     return (
@@ -539,7 +593,7 @@ def add_trigger(
     )
 
 
-@mcp.tool()
+@tool()
 def remove_trigger(map_path: str, room_name: str, trigger_id: int) -> str:
     """Remove a trigger from a room by its ID.
 
@@ -566,11 +620,11 @@ def remove_trigger(map_path: str, room_name: str, trigger_id: int) -> str:
     if len(trig_el["__children"]) == before:
         return f"Trigger id={trigger_id} not found."
 
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Removed trigger id={trigger_id} from '{room_name}'."
 
 
-@mcp.tool()
+@tool()
 def set_room_tiles(
     map_path: str,
     room_name: str,
@@ -605,13 +659,13 @@ def set_room_tiles(
         room["__children"].append(tiles_el)
 
     tiles_el["innerText"] = tiles.strip()
-    cb.write_map(path, data)
+    _save(path, data)
 
     row_count = len(tiles.strip().split("\n"))
     return f"Set {layer} tiles for '{room_name}': {row_count} rows."
 
 
-@mcp.tool()
+@tool()
 def add_room(
     map_path: str,
     room_name: str,
@@ -693,12 +747,12 @@ def add_room(
     }
 
     levels["__children"].append(room)
-    cb.write_map(path, data)
+    _save(path, data)
 
     return f"Added room '{name}' at ({x},{y}) {width}x{height}."
 
 
-@mcp.tool()
+@tool()
 def remove_room(map_path: str, room_name: str) -> str:
     """Remove a room from a map.
 
@@ -724,11 +778,11 @@ def remove_room(map_path: str, room_name: str) -> str:
     if len(levels["__children"]) == before:
         return f"Room '{room_name}' not found."
 
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Removed room '{room_name}'."
 
 
-@mcp.tool()
+@tool()
 def create_map(map_path: str, package_name: str = "") -> str:
     """Create a new empty Celeste .bin map file.
 
@@ -760,7 +814,7 @@ def create_map(map_path: str, package_name: str = "") -> str:
     }
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Created empty map: {map_path} (package: {package_name})"
 
 
@@ -812,7 +866,7 @@ def _styleground_summary(el: dict) -> str:
     return " ".join(parts)
 
 
-@mcp.tool()
+@tool()
 def list_stylegrounds(map_path: str) -> str:
     """List all stylegrounds (foreground + background effects) in a map.
 
@@ -846,7 +900,7 @@ def list_stylegrounds(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def add_styleground(
     map_path: str,
     effect_name: str,
@@ -900,7 +954,7 @@ def add_styleground(
         children.insert(index, sg)
         pos = index
 
-    cb.write_map(path, data)
+    _save(path, data)
 
     layer_label = layer_el.get("__name", layer)
     return (
@@ -908,7 +962,7 @@ def add_styleground(
     )
 
 
-@mcp.tool()
+@tool()
 def remove_styleground(map_path: str, layer: str, index: int) -> str:
     """Remove a styleground from a map by its index in the layer.
 
@@ -934,14 +988,14 @@ def remove_styleground(map_path: str, layer: str, index: int) -> str:
         )
 
     removed = children.pop(index)
-    cb.write_map(path, data)
+    _save(path, data)
     return (
         f"Removed styleground '{removed.get('__name', '?')}' "
         f"at index {index} from {layer_el.get('__name', layer)}."
     )
 
 
-@mcp.tool()
+@tool()
 def update_styleground(
     map_path: str,
     layer: str,
@@ -996,7 +1050,7 @@ def update_styleground(
             sg[k] = v
             updated.append(k)
 
-    cb.write_map(path, data)
+    _save(path, data)
 
     parts = []
     if updated:
@@ -1014,7 +1068,7 @@ def update_styleground(
 #  ENTITY / TRIGGER CATALOG TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@tool()
 def list_entity_definitions(filter_text: str = "") -> str:
     """List available Lönn entity definitions from the project.
 
@@ -1044,7 +1098,7 @@ def list_entity_definitions(filter_text: str = "") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def get_entity_definition(entity_file: str) -> str:
     """Read a Lönn entity Lua definition and extract its properties.
 
@@ -1099,7 +1153,7 @@ def get_entity_definition(entity_file: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def list_trigger_definitions(filter_text: str = "") -> str:
     """List available Lönn trigger definitions.
 
@@ -1127,7 +1181,7 @@ def list_trigger_definitions(filter_text: str = "") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def list_effect_definitions(filter_text: str = "") -> str:
     """List available Lönn effect definitions.
 
@@ -1238,7 +1292,7 @@ def _compiled_sources(source_dir: Path) -> tuple[list[Path], str]:
     return chosen, f"{len(chosen)} files, {len(prefixes)} removed folder(s)"
 
 
-@mcp.tool()
+@tool()
 def find_missing_definitions(map_path: str) -> str:
     """List namespaced entities and triggers in a map that no installed Lönn plugin defines.
 
@@ -1282,7 +1336,7 @@ def find_missing_definitions(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def audit_plugin_coverage(source_dir: str = "Source", prefix: str = "") -> str:
     """Compare the mod's C# [CustomEntity] names with its Lönn plugin definitions.
 
@@ -1336,7 +1390,7 @@ def _game_root() -> Path | None:
     return None
 
 
-@mcp.tool()
+@tool()
 def validate_audio(map_path: str) -> str:
     """Check every audio event a map references against the sound banks.
 
@@ -1419,7 +1473,7 @@ def validate_audio(map_path: str) -> str:
 #  ANALYSIS TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@tool()
 def analyze_map(map_path: str) -> str:
     """Get detailed statistics about a map file.
 
@@ -1499,7 +1553,7 @@ def analyze_map(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def visualize_map_layout(map_path: str) -> str:
     """Generate an ASCII visualization of all room positions in a map.
 
@@ -1560,7 +1614,7 @@ def visualize_map_layout(map_path: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def preview_map_section(
     map_path: str,
     prefix: str = "",
@@ -1847,7 +1901,7 @@ def _room_matches(name: str, prefix: str) -> bool:
     return short.startswith(p)
 
 
-@mcp.tool()
+@tool()
 def render_map_html(
     map_path: str,
     prefix: str = "",
@@ -2485,7 +2539,7 @@ fitToWindow(); apply();
 #  PROCEDURAL GENERATION TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@mcp.tool()
+@tool()
 def build_pattern_library(
     map_paths: str = "",
     output_path: str = "PCG/patterns.json",
@@ -2566,7 +2620,7 @@ def build_pattern_library(
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def generate_room_from_pattern(
     map_path: str,
     room_name: str,
@@ -2745,7 +2799,7 @@ def generate_room_from_pattern(
     }
 
     levels["__children"].append(room)
-    cb.write_map(map_file, data)
+    _save(map_file, data)
 
     entity_summary = ", ".join(
         f"{e['__name']}"
@@ -2769,7 +2823,7 @@ def generate_room_from_pattern(
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def validate_room(map_path: str, room_name: str) -> str:
     """Check a room for common playability problems.
 
@@ -2810,7 +2864,7 @@ def validate_room(map_path: str, room_name: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def ingest_external_map(
     source_url: str,
     attribution: str = "",
@@ -3043,7 +3097,7 @@ def ingest_external_map(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def generate_map_from_image(
     image_path: str,
     output_path: str = "",
@@ -3145,7 +3199,7 @@ def generate_map_from_image(
         return f"Error converting image: {e}"
 
     # Write .bin file
-    cb.write_map(out_file, map_data)
+    _save(out_file, map_data)
 
     # Count rooms and entities
     levels = cb.find_child(map_data, "levels")
@@ -3175,7 +3229,7 @@ def generate_map_from_image(
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def generate_terrain_map(
     output_path: str = "",
     package_name: str = "TerrainGen",
@@ -3289,7 +3343,7 @@ def generate_terrain_map(
     )
 
     # Write .bin file
-    cb.write_map(out_file, map_data)
+    _save(out_file, map_data)
 
     # Get biome summary
     summary = terrain_gen.get_biome_summary(
@@ -3331,7 +3385,7 @@ def generate_terrain_map(
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def preview_terrain_biomes(
     seed: int = 42,
     width_rooms: int = 4,
@@ -3391,7 +3445,7 @@ def preview_terrain_biomes(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def read_map_metadata(map_path: str) -> str:
     """Read high-level metadata from a map without listing all room contents.
 
@@ -3442,7 +3496,7 @@ def read_map_metadata(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def search_entities(
     map_path: str,
     entity_type: str = "",
@@ -3493,7 +3547,7 @@ def search_entities(
     return "\n".join([header] + results[:200])
 
 
-@mcp.tool()
+@tool()
 def search_triggers(
     map_path: str,
     trigger_type: str = "",
@@ -3536,7 +3590,7 @@ def search_triggers(
     return "\n".join([header] + results[:200])
 
 
-@mcp.tool()
+@tool()
 def compare_rooms(map_path: str, room_a: str, room_b: str) -> str:
     """Compare two rooms in the same map side-by-side.
 
@@ -3581,7 +3635,7 @@ def compare_rooms(map_path: str, room_a: str, room_b: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def update_entity(
     map_path: str,
     room_name: str,
@@ -3620,13 +3674,13 @@ def update_entity(
                     for k, v in props.items():
                         if k not in ("__name", "__children"):
                             ent[k] = v
-                    cb.write_map(path, data)
+                    _save(path, data)
                     return f"Updated entity id={entity_id} in {room_name}: {props}"
 
     return f"Entity id={entity_id} not found in room '{room_name}'."
 
 
-@mcp.tool()
+@tool()
 def move_entity(
     map_path: str,
     room_name: str,
@@ -3646,7 +3700,7 @@ def move_entity(
     return update_entity(map_path, room_name, entity_id, json.dumps({"x": x, "y": y}))
 
 
-@mcp.tool()
+@tool()
 def update_room(
     map_path: str,
     room_name: str,
@@ -3687,11 +3741,11 @@ def update_room(
     if not updated:
         return "No valid properties to update."
 
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Updated room '{room_name}': {', '.join(updated)}"
 
 
-@mcp.tool()
+@tool()
 def clone_room(
     map_path: str,
     source_room: str,
@@ -3737,12 +3791,12 @@ def clone_room(
 
     levels = cb.find_child(data, "levels")
     levels["__children"].append(clone)
-    cb.write_map(path, data)
+    _save(path, data)
 
     return f"Cloned '{source_room}' → '{name}' at ({clone['x']}, {clone['y']})"
 
 
-@mcp.tool()
+@tool()
 def batch_add_entities(
     map_path: str,
     room_name: str,
@@ -3802,7 +3856,7 @@ def batch_add_entities(
         next_id += 1
         added += 1
 
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Added {added} entities to room '{room_name}'."
 
 
@@ -3811,7 +3865,7 @@ def batch_add_entities(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def list_decals(map_path: str, room_name: str, layer: str = "fg") -> str:
     """List all decals in a room (foreground or background).
 
@@ -3843,7 +3897,7 @@ def list_decals(map_path: str, room_name: str, layer: str = "fg") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def add_decal(
     map_path: str,
     room_name: str,
@@ -3890,12 +3944,12 @@ def add_decal(
         "scaleY": scale_y,
     }
     decals_el["__children"].append(decal)
-    cb.write_map(path, data)
+    _save(path, data)
 
     return f"Added {layer} decal '{texture}' at ({x},{y}) in room '{room_name}'."
 
 
-@mcp.tool()
+@tool()
 def remove_decal(
     map_path: str,
     room_name: str,
@@ -3928,7 +3982,7 @@ def remove_decal(
         return f"Invalid index {index}. Range: 0-{len(children)-1}"
 
     removed = children.pop(index)
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Removed {layer} decal '{removed.get('texture', '?')}' (index {index}) from '{room_name}'."
 
 
@@ -3937,7 +3991,7 @@ def remove_decal(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def analyze_entity_usage(map_path: str) -> str:
     """Analyze entity usage across the entire map.
 
@@ -3967,7 +4021,7 @@ def analyze_entity_usage(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def analyze_difficulty(map_path: str, room_name: str = "") -> str:
     """Estimate room or map difficulty from hazard density, nav aids, and tile coverage.
 
@@ -4013,7 +4067,7 @@ def analyze_difficulty(map_path: str, room_name: str = "") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def find_entity_references(map_path: str, entity_type: str) -> str:
     """Find all occurrences of an entity type across the map.
 
@@ -4043,7 +4097,7 @@ def find_entity_references(map_path: str, entity_type: str) -> str:
     return f"Found {len(refs)} '{entity_type}' entities:\n" + "\n".join(refs)
 
 
-@mcp.tool()
+@tool()
 def detect_map_patterns(map_path: str) -> str:
     """Detect gameplay design archetypes (linear, hub, collectible-rich, etc.).
 
@@ -4067,7 +4121,7 @@ def detect_map_patterns(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def analyze_room_connectivity(map_path: str) -> str:
     """Analyze room adjacency graph showing isolated rooms, dead ends, and hubs.
 
@@ -4114,7 +4168,7 @@ def analyze_room_connectivity(map_path: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def suggest_improvements(map_path: str, room_name: str) -> str:
     """Suggest improvements for a room based on analysis.
 
@@ -4143,7 +4197,7 @@ def suggest_improvements(map_path: str, room_name: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def compare_maps(map_path_a: str, map_path_b: str) -> str:
     """Compare two maps and show structural differences.
 
@@ -4187,7 +4241,7 @@ def compare_maps(map_path_a: str, map_path_b: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def wiki_save(key: str, content: str, tags: str = "") -> str:
     """Save analysis results or notes to the local wiki cache.
 
@@ -4204,7 +4258,7 @@ def wiki_save(key: str, content: str, tags: str = "") -> str:
     return f"Saved wiki entry '{key}' ({len(content)} chars) → {rel_path}"
 
 
-@mcp.tool()
+@tool()
 def wiki_search(query: str) -> str:
     """Search the wiki cache by key, content, or tags.
 
@@ -4221,7 +4275,7 @@ def wiki_search(query: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def wiki_list() -> str:
     """List all entries in the wiki cache."""
     entries = gdep_tools.wiki_list_entries(WORKSPACE)
@@ -4234,7 +4288,7 @@ def wiki_list() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def wiki_get(key: str) -> str:
     """Retrieve a specific wiki entry by key.
 
@@ -4258,7 +4312,7 @@ def wiki_get(key: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def get_mod_info() -> str:
     """Get information about the current mod project.
 
@@ -4311,7 +4365,7 @@ def get_mod_info() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def validate_map(map_path: str, auto_fix: bool = False) -> str:
     """Validate an entire map for playability issues.
 
@@ -4345,7 +4399,7 @@ def validate_map(map_path: str, auto_fix: bool = False) -> str:
                 lines.append(f"    ✓ Fixed: {fix}")
 
     if auto_fix and total_fixes > 0:
-        cb.write_map(path, data)
+        _save(path, data)
 
     lines.insert(1, f"  Issues: {total_issues}")
     if auto_fix:
@@ -4361,7 +4415,7 @@ def validate_map(map_path: str, auto_fix: bool = False) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def get_trigger_definition(trigger_name: str) -> str:
     """Read the source of a Lönn trigger definition .lua file.
 
@@ -4389,7 +4443,7 @@ def get_trigger_definition(trigger_name: str) -> str:
     )
 
 
-@mcp.tool()
+@tool()
 def get_effect_definition(effect_name: str) -> str:
     """Read the source of a Lönn effect definition .lua file.
 
@@ -4421,7 +4475,7 @@ def get_effect_definition(effect_name: str) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def export_room_json(map_path: str, room_name: str, output_path: str = "") -> str:
     """Export a room as a JSON file for external editing or sharing.
 
@@ -4451,7 +4505,7 @@ def export_room_json(map_path: str, room_name: str, output_path: str = "") -> st
     return f"Exported room '{room_name}' → {rel}"
 
 
-@mcp.tool()
+@tool()
 def import_room_json(
     map_path: str,
     json_path: str,
@@ -4504,7 +4558,7 @@ def import_room_json(
             return f"Room '{room.get('name')}' already exists in map."
 
     levels["__children"].append(room)
-    cb.write_map(map_file, data)
+    _save(map_file, data)
     return f"Imported room '{room.get('name')}' into {map_path} at ({room.get('x',0)},{room.get('y',0)})"
 
 
@@ -4513,7 +4567,7 @@ def import_room_json(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@mcp.tool()
+@tool()
 def summarize_map_diff(map_path: str, snapshot_key: str = "") -> str:
     """Create or compare a structural snapshot of the map.
 
@@ -4568,7 +4622,7 @@ def summarize_map_diff(map_path: str, snapshot_key: str = "") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def batch_validate_and_fix(map_path: str, auto_fix: bool = False) -> str:
     """Validate all rooms in a map and optionally auto-fix issues.
 
@@ -4609,7 +4663,7 @@ _WIND_PATTERNS = frozenset({
 })
 
 
-@mcp.tool()
+@tool()
 def get_room_settings(map_path: str, room_name: str) -> str:
     """Get all editable settings for a room (music, physics, wind, camera, flags).
 
@@ -4660,7 +4714,7 @@ def get_room_settings(map_path: str, room_name: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def update_room_settings(
     map_path: str,
     room_name: str,
@@ -4723,7 +4777,7 @@ def update_room_settings(
         applied.append(f"{k}={v!r}")
 
     if applied:
-        cb.write_map(path, data)
+        _save(path, data)
 
     lines = [f"Room '{room.get('name')}' settings update:"]
     if applied:
@@ -4735,7 +4789,7 @@ def update_room_settings(
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def rename_room(map_path: str, room_name: str, new_name: str) -> str:
     """Rename a room in a map.
 
@@ -4757,11 +4811,11 @@ def rename_room(map_path: str, room_name: str, new_name: str) -> str:
 
     old_name = room.get("name")
     room["name"] = canonical
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Renamed room '{old_name}' → '{canonical}'."
 
 
-@mcp.tool()
+@tool()
 def move_room(map_path: str, room_name: str, x: int, y: int) -> str:
     """Move a room to a new world-space position.
 
@@ -4780,11 +4834,11 @@ def move_room(map_path: str, room_name: str, x: int, y: int) -> str:
     old_x, old_y = room.get("x", 0), room.get("y", 0)
     room["x"] = x
     room["y"] = y
-    cb.write_map(path, data)
+    _save(path, data)
     return f"Moved room '{room.get('name')}' ({old_x},{old_y}) → ({x},{y})."
 
 
-@mcp.tool()
+@tool()
 def resize_room(map_path: str, room_name: str, width: int, height: int) -> str:
     """Resize a room (snaps to 8-pixel grid, preserves tile data).
 
@@ -4808,7 +4862,7 @@ def resize_room(map_path: str, room_name: str, width: int, height: int) -> str:
     old_w, old_h = room.get("width", 0), room.get("height", 0)
     room["width"] = width
     room["height"] = height
-    cb.write_map(path, data)
+    _save(path, data)
     return (
         f"Resized room '{room.get('name')}': "
         f"{old_w}x{old_h} → {width}x{height} px."
@@ -4866,7 +4920,7 @@ def _format_meta_node(el: dict, indent: int = 1) -> list[str]:
     return lines
 
 
-@mcp.tool()
+@tool()
 def get_map_metadata(map_path: str) -> str:
     """Read the map-level metadata block (Everest/celeste.yaml meta settings).
 
@@ -4910,7 +4964,7 @@ def get_map_metadata(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def set_map_metadata(map_path: str, settings: str, subpath: str = "") -> str:
     """Set map-level metadata properties (Everest meta block).
 
@@ -4967,7 +5021,7 @@ def set_map_metadata(map_path: str, settings: str, subpath: str = "") -> str:
             target[k] = v
             applied.append(f"{k}={v!r}")
 
-    cb.write_map(path, data)
+    _save(path, data)
     label = data.get('_package', '?') + (f" [meta/{subpath}]" if subpath else " [meta]")
     return (
         f"Map metadata updated for '{label}':\n"
@@ -4996,7 +5050,7 @@ def _walk_replace_strings(
         _walk_replace_strings(child, old, new, changes, node_path)
 
 
-@mcp.tool()
+@tool()
 def replace_audio_event(map_path: str, old_event: str, new_event: str, dry_run: bool = False) -> str:
     """Find and replace an FMOD audio event path anywhere in a map.
 
@@ -5035,12 +5089,12 @@ def replace_audio_event(map_path: str, old_event: str, new_event: str, dry_run: 
         lines.append(f"  {node_path} | {key}: {old_v} -> {new_v}")
 
     if not dry_run:
-        cb.write_map(path, data)
+        _save(path, data)
 
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def get_map_dependencies(map_path: str) -> str:
     """Read the mod dependencies list from a map's everest.yaml or meta node.
 
@@ -5103,7 +5157,7 @@ def get_map_dependencies(map_path: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def set_map_dependencies(map_path: str, dependencies: str) -> str:
     """Write or update the mod dependency list in the map's everest.yaml.
 
@@ -5155,214 +5209,6 @@ def set_map_dependencies(map_path: str, dependencies: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  LÖNN MANAGER — plugin bridge (writes Lua plugin + HTTP status helpers)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_LOENN_MANAGER_LUA = r'''-- loenn_mcp_manager.lua
--- Lönn plugin that exposes a live HTTP bridge to the loenn-mcp MCP server.
--- Drop this file into your Lönn plugins/ folder (or mod's Loenn/plugins/).
--- Requires: Lönn 0.7.0+ (lua-http or love.thread http support)
-
-local mcp = {}
-
-mcp._VERSION = "1.0.0"
-mcp._MCP_HOST = os.getenv("LOENN_MCP_HOST") or "http://localhost:8080"
-
--- ── Internal helpers ──────────────────────────────────────────────────────────
-
-local function _post(endpoint, payload)
-    -- Uses Lönn's built-in http if available, falls back to os.execute + curl
-    local url = mcp._MCP_HOST .. endpoint
-    local body = require("json").encode(payload or {})
-    local ok, res
-    -- Try Lönn/LOVE http first
-    if love and love.filesystem then
-        local http = require("socket.http")
-        local ltn12 = require("ltn12")
-        local resp = {}
-        local _, code = http.request({
-            url = url,
-            method = "POST",
-            headers = {
-                ["Content-Type"] = "application/json",
-                ["Content-Length"] = tostring(#body),
-            },
-            source = ltn12.source.string(body),
-            sink   = ltn12.sink.table(resp),
-        })
-        return code == 200, table.concat(resp)
-    end
-    -- Fallback: curl (Windows & Linux)
-    local tmpIn  = os.tmpname() .. ".json"
-    local tmpOut = os.tmpname() .. ".json"
-    local f = io.open(tmpIn, "w") f:write(body) f:close()
-    os.execute(string.format(
-        'curl -s -X POST -H "Content-Type: application/json" --data @%s %s -o %s',
-        tmpIn, url, tmpOut
-    ))
-    local g = io.open(tmpOut, "r")
-    local result = g and g:read("*a") or ""
-    if g then g:close() end
-    os.remove(tmpIn) os.remove(tmpOut)
-    return true, result
-end
-
--- ── Public API ─────────────────────────────────────────────────────────────
-
---- Ping the MCP server and return version info
-function mcp.ping()
-    local ok, body = _post("/ping", {})
-    return ok, body
-end
-
---- Reload the currently open map from the MCP server's workspace copy
-function mcp.sync_reload(map_path)
-    return _post("/tools/read_map_overview", { map_path = map_path })
-end
-
---- Push an entity from Lönn to MCP (add_entity call)
-function mcp.push_entity(map_path, room_name, entity)
-    return _post("/tools/add_entity", {
-        map_path    = map_path,
-        room_name   = room_name,
-        entity_name = entity.name or entity._name,
-        x           = entity.x or 0,
-        y           = entity.y or 0,
-        properties  = require("json").encode(entity),
-    })
-end
-
---- Push room settings to MCP (update_room_settings call)
-function mcp.push_room_settings(map_path, room_name, settings_table)
-    return _post("/tools/update_room_settings", {
-        map_path  = map_path,
-        room_name = room_name,
-        settings  = require("json").encode(settings_table),
-    })
-end
-
---- Push a styleground to MCP
-function mcp.push_styleground(map_path, effect_name, layer, props_table)
-    return _post("/tools/add_styleground", {
-        map_path    = map_path,
-        effect_name = effect_name,
-        layer       = layer or "bg",
-        properties  = require("json").encode(props_table or {}),
-    })
-end
-
---- Analyze the map via MCP ML analyzer
-function mcp.analyze_assets(map_path)
-    return _post("/tools/analyze_map_assets", { map_path = map_path })
-end
-
---- Get map dependencies
-function mcp.get_dependencies(map_path)
-    return _post("/tools/get_map_dependencies", { map_path = map_path })
-end
-
--- ── Lönn Plugin Registration ───────────────────────────────────────────────
-
--- Register as a Lönn plugin tool menu item if running inside Lönn
-if lonn and lonn.registerPlugin then
-    lonn.registerPlugin({
-        name    = "MCP Manager",
-        version = mcp._VERSION,
-        menu    = {
-            {
-                label  = "Ping MCP Server",
-                action = function()
-                    local ok, resp = mcp.ping()
-                    if ok then
-                        lonn.notify("MCP: " .. tostring(resp))
-                    else
-                        lonn.notify("MCP server not reachable at " .. mcp._MCP_HOST)
-                    end
-                end,
-            },
-            {
-                label  = "Sync / Reload Map",
-                action = function()
-                    local path = lonn.getCurrentMapPath and lonn.getCurrentMapPath()
-                    if not path then lonn.notify("No map open.") return end
-                    local ok, resp = mcp.sync_reload(path)
-                    lonn.notify(ok and "Synced." or ("Sync failed: " .. tostring(resp)))
-                end,
-            },
-            {
-                label  = "Analyze Map Assets (ML)",
-                action = function()
-                    local path = lonn.getCurrentMapPath and lonn.getCurrentMapPath()
-                    if not path then lonn.notify("No map open.") return end
-                    local ok, resp = mcp.analyze_assets(path)
-                    lonn.notify(ok and "Analysis done. Check MCP output." or "Analysis failed.")
-                end,
-            },
-        },
-    })
-end
-
-return mcp
-'''
-
-
-@mcp.tool()
-def install_loenn_manager(target_dir: str = "Loenn/plugins") -> str:
-    """Install the Lönn MCP Manager plugin into the Lönn plugins directory.
-
-    Writes loenn_mcp_manager.lua to the specified directory. Drop this
-    plugin into your Lönn plugins/ folder or your mod's Loenn/plugins/
-    to enable live two-way communication between Lönn and this MCP server.
-
-    Features of the installed plugin:
-      - Ping MCP server health check
-      - Sync/reload current map from MCP workspace
-      - Push entity/room-settings/styleground changes from Lönn → MCP
-      - Trigger ML asset analysis from inside Lönn
-      - Registered as a Lönn tool menu under "MCP Manager"
-
-    Args:
-        target_dir: Directory to install into (default: Loenn/plugins)
-    """
-    target = (WORKSPACE / target_dir).resolve()
-    try:
-        target.relative_to(WORKSPACE)
-    except ValueError:
-        return "target_dir must be within the workspace."
-
-    target.mkdir(parents=True, exist_ok=True)
-    lua_file = target / "loenn_mcp_manager.lua"
-    lua_file.write_text(_LOENN_MANAGER_LUA, encoding="utf-8")
-
-    rel = lua_file.relative_to(WORKSPACE)
-    return (
-        f"Lönn MCP Manager plugin installed: {rel}\n\n"
-        f"Usage:\n"
-        f"  1. Copy {rel} into your Lönn installation's plugins/ folder\n"
-        f"     or your mod's Loenn/plugins/ directory.\n"
-        f"  2. Set LOENN_MCP_HOST env var (default: http://localhost:8080)\n"
-        f"     to point at this MCP server's HTTP endpoint.\n"
-        f"  3. Restart Lönn — a 'MCP Manager' menu will appear in Tools.\n\n"
-        f"Plugin API (call from Lua):\n"
-        f"  local mcp = require('loenn_mcp_manager')\n"
-        f"  mcp.ping()                          -- health check\n"
-        f"  mcp.push_room_settings(path, room, {{dark=true}})\n"
-        f"  mcp.push_styleground(path, 'parallax', 'bg', {{texture='…'}})\n"
-        f"  mcp.analyze_assets(path)            -- ML analysis\n"
-        f"  mcp.get_dependencies(path)          -- read everest.yaml\n"
-    )
-
-
-@mcp.tool()
-def get_loenn_manager_source() -> str:
-    """Return the source code of the Lönn MCP Manager plugin.
-
-    Use this to inspect or copy the plugin code without writing it to disk.
-    """
-    return _LOENN_MANAGER_LUA
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #  ML ASSET ANALYSIS — Maddie480 graphics dump + Lönn source patterns
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -5375,7 +5221,7 @@ except ImportError:
         graphics_analyzer = None             # optional module
 
 
-@mcp.tool()
+@tool()
 def analyze_map_assets(
     map_path: str,
     check_textures: bool = True,
@@ -5587,7 +5433,7 @@ def _default_out(source: Path, suffix: str) -> Path:
     return out_dir / f"{source.stem}{suffix}"
 
 
-@mcp.tool()
+@tool()
 def map_to_json(map_path: str, output_path: str = "", indent: int = 1) -> str:
     """Convert a .bin map to typed JSON that converts back byte-identical.
 
@@ -5620,7 +5466,7 @@ def map_to_json(map_path: str, output_path: str = "", indent: int = 1) -> str:
             f"(sha256 {doc['source']['sha256'][:12]}…).")
 
 
-@mcp.tool()
+@tool()
 def json_to_map(json_path: str, map_path: str, overwrite: bool = False) -> str:
     """Convert typed JSON (from map_to_json, possibly edited) back to a .bin map.
 
@@ -5639,10 +5485,11 @@ def json_to_map(json_path: str, map_path: str, overwrite: bool = False) -> str:
     if not src.exists():
         return f"File not found: {json_path}"
     if out.exists() and not overwrite:
-        return f"{map_path} exists. Pass overwrite=true to replace it (a .bak copy is kept)."
+        return f"{map_path} exists. Pass overwrite=true to replace it (a timestamped backup is kept)."
     try:
         doc = json.loads(src.read_text(encoding="utf-8"))
-        notes = map_json.write_json_as_map(doc, out)
+        data_, notes = map_json.json_to_bin(doc)
+        _save_bytes(out, data_, doc.get("header", "CELESTE MAP"))
     except json.JSONDecodeError as exc:
         return f"Not written: invalid JSON ({exc})"
     except (map_json.MapJsonError, ValueError) as exc:
@@ -5650,7 +5497,7 @@ def json_to_map(json_path: str, map_path: str, overwrite: bool = False) -> str:
     return f"Wrote {out}\n" + "\n".join(f"  - {n}" for n in notes)
 
 
-@mcp.tool()
+@tool()
 def check_authoring_json(authoring_json: str) -> str:
     """Resolve authoring JSON without a map: show each object with its defaults
     filled in from the Lönn definitions, and flag unknown names.
@@ -5679,7 +5526,7 @@ def check_authoring_json(authoring_json: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@tool()
 def merge_json_into_map(
     map_path: str,
     authoring_json: str,
@@ -5730,9 +5577,8 @@ def merge_json_into_map(
         return "\n".join(report)
     if path.read_bytes() != original:
         return "Not written: the map changed on disk while merging. Run again."
-    cb.write_map_bytes(path, new_bytes)
-    report.append(f"\nWritten ({len(original)} → {len(new_bytes)} bytes). Previous version kept as "
-                  f"{path.name}.bak1.")
+    _save_bytes(path, new_bytes)
+    report.append(f"\nWritten ({len(original)} → {len(new_bytes)} bytes).")
     return "\n".join(report)
 
 
@@ -5760,7 +5606,7 @@ def _run_author_script(script: Path, timeout: int = 60) -> tuple:
         return json.loads(out.read_text(encoding="utf-8")), log
 
 
-@mcp.tool()
+@tool()
 def run_author_script(
     script_path: str,
     map_path: str = "",
@@ -5859,7 +5705,7 @@ def _session() -> dict[str, str]:
     return fields
 
 
-@mcp.tool()
+@tool()
 def game_status() -> str:
     """Where the running game is: map SID, side, room and player position."""
     try:
@@ -5872,7 +5718,7 @@ def game_status() -> str:
             f"Room: {s.get('Level')}\nPosition: ({s.get('X')}, {s.get('Y')})")
 
 
-@mcp.tool()
+@tool()
 def game_reload_map(map_path: str, side: str = "A") -> str:
     """Make the running game re-read a map after it was edited on disk.
 
@@ -5891,7 +5737,7 @@ def game_reload_map(map_path: str, side: str = "A") -> str:
     return f"Reload requested for {sid} ({side}-side)."
 
 
-@mcp.tool()
+@tool()
 def game_teleport(map_path: str, room: str, side: str = "A", x: int | None = None, y: int | None = None) -> str:
     """Load a room of a map in the running game (a fresh debug session).
 
@@ -5917,7 +5763,7 @@ def game_teleport(map_path: str, room: str, side: str = "A", x: int | None = Non
     return f"In {sid} room {s.get('Level')} at ({s.get('X')}, {s.get('Y')})."
 
 
-@mcp.tool()
+@tool()
 def game_play_tas(map_path: str, room: str, inputs: str, intro_frames: int = 40,
                   timeout_s: float = 60) -> str:
     """Play CelesteTAS inputs from a room's spawn and report where the player ended up.
@@ -5979,7 +5825,7 @@ def game_play_tas(map_path: str, room: str, inputs: str, intro_frames: int = 40,
             f"  Dashes left:   {st.group(3) if st.group(3).strip().isdigit() else '-'}")
 
 
-@mcp.tool()
+@tool()
 def game_log(lines: int = 400, only_problems: bool = True) -> str:
     """Recent lines of the game's log.txt: errors, warnings and level loads.
 
@@ -5997,6 +5843,503 @@ def game_log(lines: int = 400, only_problems: bool = True) -> str:
         keep = re.compile(r"\[Error\]|Exception|Failed loading|Event not found|does not exist|LevelLoader")
         tail = [l for l in tail if keep.search(l) and "CONFLICT" not in l]
     return "\n".join(tail[-120:]) or "No problems in the scanned lines."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SAFETY: copies, commits, backups, diff
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _rel(p: Path) -> str:
+    try:
+        return Path(p).resolve().relative_to(WORKSPACE).as_posix()
+    except ValueError:
+        return str(p)
+
+
+def _resolve_read(path_str: str) -> Path:
+    """Like _resolve, but also accepts files in the backup store."""
+    p = Path(path_str)
+    if p.is_absolute():
+        rp = p.resolve()
+        try:
+            rp.relative_to(safety.state_dir().resolve())
+            return rp
+        except ValueError:
+            pass
+    return _resolve(path_str)
+
+
+def _default_copy_path(src: Path) -> Path:
+    rel = Path(_rel(src))
+    parts = rel.parts
+    if len(parts) >= 4 and parts[0].lower() == "maps":
+        folder = WORKSPACE / parts[0] / parts[1] / "wip"
+    else:
+        folder = src.parent
+    dest = folder / f"{src.stem}.copy.bin"
+    if dest.exists():
+        dest = folder / f"{src.stem}.copy-{safety.timestamp()[:15]}.bin"
+    return dest
+
+
+@tool()
+def map_copy(map_path: str, dest: str = "") -> str:
+    """Copy a map to a working copy so edits never touch the original. Default target: Maps/<mod>/wip/<name>.copy.bin.
+
+    Args:
+        map_path: .bin to copy
+        dest: Target .bin in the workspace; must not exist yet
+    """
+    src = _resolve(map_path)
+    if not src.exists():
+        return f"File not found: {map_path}"
+    out = _resolve(dest) if dest else _default_copy_path(src)
+    if out.exists():
+        return f"Not copied: {_rel(out)} already exists. Pick another dest."
+    data = src.read_bytes()
+    _save_bytes(out, data)
+    return (f"Copied {_rel(src)} -> {_rel(out)}. Edit the copy, check it with map_diff, then apply it with "
+            f"map_commit(work_map='{_rel(out)}', target_map='{_rel(src)}').")
+
+
+def _replace_rooms(target: dict, work: dict, names: list[str]) -> list[str]:
+    """Put the named rooms from `work` into `target` (replace by name, or add). Returns a report."""
+    levels = cb.find_child(target, "levels")
+    report = []
+    for name in names:
+        room = authoring._find_room(work, name)
+        if room is None:
+            raise ValueError(f"room '{name}' is not in the work map")
+        old = authoring._find_room(target, name)
+        box = {k: room.get(k, 0) for k in ("x", "y", "width", "height")}
+        for r in cb.get_rooms(target):
+            if r is old:
+                continue
+            if authoring._overlaps(box, {k: r.get(k, 0) for k in ("x", "y", "width", "height")}):
+                raise ValueError(f"room '{name}' would overlap '{r.get('name')}' in the target map")
+        if old is not None:
+            levels["__children"][levels["__children"].index(old)] = room
+            report.append(f"replaced {mapdiff.short_name(str(room.get('name')))}")
+        else:
+            levels["__children"].append(room)
+            report.append(f"added {mapdiff.short_name(str(room.get('name')))}")
+    return report
+
+
+@tool()
+def map_commit(work_map: str, target_map: str, rooms: str = "", dry_run: bool = True,
+               allow_issues: bool = False) -> str:
+    """Apply a working copy to the real map: whole file, or only the listed rooms. Dry run shows the diff first.
+
+    Args:
+        work_map: The edited copy
+        target_map: The map to update (a timestamped backup is kept)
+        rooms: Comma-separated room names to take from the copy; empty = replace the whole map
+        dry_run: Only show the diff and checks (default). Set false to write.
+        allow_issues: Write even if the committed rooms fail validation (e.g. no player spawn)
+    """
+    work, target = _resolve(work_map), _resolve(target_map)
+    for p, label in ((work, work_map), (target, target_map)):
+        if not p.exists():
+            return f"File not found: {label}"
+    if work == target:
+        return "work_map and target_map are the same file."
+    target_bytes = target.read_bytes()
+    try:
+        if rooms.strip():
+            names = [r.strip() for r in rooms.split(",") if r.strip()]
+            tree = cb.read_map_bytes(target_bytes)
+            report = _replace_rooms(tree, cb.read_map(work), names)
+            payload = cb.serialize_map(tree)
+            checked = [authoring._find_room(tree, n) for n in names]
+        else:
+            payload = work.read_bytes()
+            report = [f"replace the whole map with {_rel(work)}"]
+            checked = cb.get_rooms(cb.read_map_bytes(payload))
+    except ValueError as exc:
+        return f"Not committed: {exc}"
+    issues = {}
+    for room in checked:
+        res = gdep_tools.validate_and_fix_room(json.loads(json.dumps(room, default=str)), auto_fix=False)
+        if res["issues"]:
+            issues[mapdiff.short_name(str(room.get("name")))] = res["issues"]
+    d = mapdiff.diff_bytes(target_bytes, payload)
+    lines = [f"{'DRY RUN, nothing written' if dry_run else 'COMMIT'}: {_rel(work)} -> {_rel(target)}",
+             *[f"  {r}" for r in report], "", "Diff (target -> result):", d.text(limit=120)]
+    if issues:
+        lines.append("\nValidation issues in committed rooms:")
+        lines += [f"  {n}: {'; '.join(i)}" for n, i in issues.items()]
+    if dry_run:
+        lines.append("\nRun again with dry_run=false to write.")
+        return "\n".join(lines)
+    if issues and not allow_issues:
+        lines.append("\nNot written: fix the issues above, or pass allow_issues=true.")
+        return "\n".join(lines)
+    if target.read_bytes() != target_bytes:
+        return "Not committed: the target changed on disk meanwhile. Run again."
+    safety.save_bytes(target, payload, WORKSPACE, allow_protected=True, reason="commit")
+    return "\n".join(lines)
+
+
+@tool()
+def map_backups(map_path: str, limit: int = 20) -> str:
+    """List the timestamped backups of a map, newest first.
+
+    Args:
+        map_path: The .bin whose backups to list
+        limit: Maximum entries
+    """
+    path = _resolve(map_path)
+    found = safety.list_backups(path, WORKSPACE)
+    if not found:
+        return f"No backups of {_rel(path)} in {safety.backup_dir_for(path, WORKSPACE)}"
+    lines = [f"{len(found)} backup(s) of {_rel(path)} (newest first):"]
+    for b in found[:limit]:
+        lines.append(f"  {b.name}  {b.stat().st_size} bytes")
+    lines.append(f"Folder: {found[0].parent}")
+    return "\n".join(lines)
+
+
+@tool()
+def map_restore(map_path: str, backup: str = "latest", dry_run: bool = True) -> str:
+    """Restore a map from one of its backups (the current file is backed up first).
+
+    Args:
+        map_path: The .bin to restore
+        backup: Backup file name from map_backups, or "latest"
+        dry_run: Only show what would change (default)
+    """
+    path = _resolve(map_path)
+    found = safety.list_backups(path, WORKSPACE)
+    if not found:
+        return f"No backups of {_rel(path)}."
+    pick = found[0] if backup == "latest" else next((b for b in found if b.name == backup), None)
+    if pick is None:
+        return f"No backup named {backup}. Use map_backups to list them."
+    data = pick.read_bytes()
+    cur = path.read_bytes() if path.exists() else None
+    diff = mapdiff.diff_bytes(cur, data).text(limit=80) if cur else "(map file is missing)"
+    if dry_run:
+        return f"DRY RUN: restoring {pick.name} would change {_rel(path)}:\n{diff}\nRun with dry_run=false."
+    _save_bytes(path, data)
+    return f"Restored {_rel(path)} from {pick.name}.\n{diff}"
+
+
+@tool()
+def map_diff(map_a: str, map_b: str = "", limit: int = 200) -> str:
+    """Semantic diff of two maps: rooms, geometry, fg/bg tiles, entities, triggers, decals, stylegrounds, meta.
+
+    Lönn re-encodes the whole file on save, so this compares meaning, not bytes.
+
+    Args:
+        map_a: The older map (or the map to compare with its latest backup when map_b is empty)
+        map_b: The newer map; empty = compare map_a's latest backup -> map_a
+        limit: Maximum output lines
+    """
+    a = _resolve_read(map_a)
+    if not a.exists():
+        return f"File not found: {map_a}"
+    if map_b:
+        b = _resolve_read(map_b)
+        if not b.exists():
+            return f"File not found: {map_b}"
+        old, new, label = a, b, f"{_rel(a)} -> {_rel(b)}"
+    else:
+        found = safety.list_backups(a, WORKSPACE)
+        if not found:
+            return f"No backup of {_rel(a)} to compare with; pass map_b."
+        old, new, label = found[0], a, f"backup {found[0].name} -> {_rel(a)}"
+    d = mapdiff.diff_bytes(old.read_bytes(), new.read_bytes())
+    return f"Diff {label}\n{d.text(limit=limit)}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ASSETS (sprites first)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _has_definition(name: str, kind: str) -> bool:
+    return _catalog().get(name, "entities" if kind == "entity" else "triggers") is not None
+
+
+@tool()
+def check_assets(map_path: str, limit: int = 100) -> str:
+    """Check that a map only uses things that exist: entity/trigger names with a Lönn definition, decal and parallax textures.
+
+    Textures are looked up in this mod, every installed mod and the vanilla atlases (case-insensitive, like the game).
+
+    Args:
+        map_path: The .bin to check
+        limit: Maximum findings to list
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    idx = assets.build_index(WORKSPACE)
+    rep = assets.check_map_assets(cb.read_map(path), idx, _has_definition)
+    lines = [f"Assets in {_rel(path)}: {rep.checked_names} object names, {rep.checked_textures} textures checked "
+             f"against {idx.count()} known textures."]
+    if rep.ok:
+        lines.append("Everything exists.")
+    for title, items in (("Names with no Lönn definition", rep.unknown_names),
+                         ("Missing textures", rep.missing_textures)):
+        if items:
+            lines.append(f"{title} ({len(items)}):")
+            lines += [f"  {i}" for i in items[:limit]]
+    return "\n".join(lines)
+
+
+@tool()
+def check_sprites_xml(xml_path: str = "Graphics/Sprites.xml", limit: int = 100) -> str:
+    """Check a Sprites.xml: it parses, ids are unique, and every Anim/Loop has frames in the atlas. Check this first when a sprite does not show in game.
+
+    Args:
+        xml_path: Sprites.xml in the workspace
+        limit: Maximum findings to list
+    """
+    path = _resolve(xml_path)
+    if not path.exists():
+        return f"File not found: {xml_path}"
+    idx = assets.build_index(WORKSPACE)
+    n, issues = assets.check_sprites_xml(path, idx)
+    lines = [f"{_rel(path)}: {n} sprites, {len(issues)} issue(s)."]
+    by_sprite: dict[str, list] = {}
+    for i in issues:
+        by_sprite.setdefault(i.sprite, []).append(i)
+    shown = 0
+    for sprite, items in by_sprite.items():
+        lines.append(f"  {sprite}:")
+        for i in items:
+            if shown >= limit:
+                break
+            lines.append(f"    {i.anim + ': ' if i.anim else ''}{i.problem}")
+            shown += 1
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  EDITORS (Lönn now, Rysy later)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _editor_session(session: str) -> "editors.EditorSession":
+    if session:
+        s = editors.SESSIONS.get(session)
+        if s is None:
+            raise editors.EditorError(f"no session '{session}'. Known: {', '.join(editors.SESSIONS) or 'none'}")
+        return s
+    if not editors.SESSIONS:
+        raise editors.EditorError("no editor session; call editor_open first")
+    running = [s for s in editors.SESSIONS.values() if s.running()]
+    return (running or list(editors.SESSIONS.values()))[-1]
+
+
+def _adapter_for(s: "editors.EditorSession") -> "editors.EditorAdapter":
+    return editors.get_adapter(s.editor, WORKSPACE)
+
+
+@tool()
+def editor_open(map_path: str, room: str = "", editor: str = "loenn", storage: str = "isolated") -> str:
+    """Open a map in Lönn (or Rysy), optionally on a room. MCP writes to that map are refused until it closes.
+
+    Args:
+        map_path: The .bin to open
+        room: Room to select on load (Lönn only)
+        editor: "loenn" or "rysy"
+        storage: Lönn settings folder: "isolated" (own copy, default) or "user" (your normal Lönn)
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    kw = {"storage": storage} if editor.lower().startswith(("l", "lö")) else {}
+    adapter = editors.get_adapter(editor, WORKSPACE, **kw)
+    s = adapter.open(path, room or None)
+    lines = [f"Opened {_rel(path)} in {s.editor} (session {s.id}, pid {s.pid})" + (f" on room {room}" if room else "."),
+             "Lönn takes ~20 s to load with many mods installed.",
+             f"Call editor_wait(session='{s.id}') to wait for the user to save; it reports what changed.",
+             "When done: editor_close. Until then MCP writes to this map are refused."]
+    lines += [f"Note: {n}" for n in s.notes]
+    return "\n".join(lines)
+
+
+@tool()
+def editor_wait(session: str = "", timeout_s: int = 120) -> str:
+    """Wait until the user saves in the editor (or it closes), then report what changed. Call again to keep waiting.
+
+    Args:
+        session: Session id from editor_open; empty = the latest
+        timeout_s: Seconds to wait, 1 to 600
+    """
+    s = _editor_session(session)
+    adapter = _adapter_for(s)
+    reason, ev = adapter.wait(s, max(1, min(600, timeout_s)))
+    head = {"saved": "Saved.", "saved_and_exited": "Saved, and the editor closed.",
+            "exited": "The editor closed without a new save.", "timeout": "No save yet (timed out)."}[reason]
+    lines = [f"[{s.id}] {head}"]
+    if ev:
+        lines += ["Changes in this save:", ev.diff_text]
+    lines.append(f"Saves this session: {len(s.saves)}. Editor running: {s.running()}.")
+    return "\n".join(lines)
+
+
+@tool()
+def editor_status() -> str:
+    """List editor sessions from this server and any other running Lönn."""
+    lines = []
+    for s in editors.SESSIONS.values():
+        _adapter_for(s).poll(s)
+        lines.append(f"{s.id}: {s.editor} pid {s.pid} {'running' if s.running() else 'closed'} on {_rel(s.map_path)}"
+                     + (f" room {s.room}" if s.room else "") + f", {len(s.saves)} save(s)")
+    ours = {s.pid for s in editors.SESSIONS.values() if s.running()}
+    other = [p for p in editors.loenn.running_loenn(max_age=0) if p[1] not in ours]
+    if other:
+        lines.append("Other Lönn processes (not started here): " + ", ".join(f"pid {pid}" for _, pid in other))
+    return "\n".join(lines) or "No editor sessions and no Lönn running."
+
+
+@tool()
+def editor_close(session: str = "", force: bool = False) -> str:
+    """Close an editor session. Without force, the editor may ask about unsaved changes and stay open.
+
+    Args:
+        session: Session id; empty = the latest
+        force: Kill the editor; unsaved editor changes are lost
+    """
+    s = _editor_session(session)
+    adapter = _adapter_for(s)
+    result = adapter.close(s, force=force)
+    lines = [f"[{s.id}] {result}"]
+    if not s.running():
+        lines += ["Changes since editor_open:", adapter.diff_since_open(s)]
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SPRITE FUSION (gray-box rooms)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tool()
+def sf_make_tileset(out_dir: str = "") -> str:
+    """Write the Celeste gray-box tileset for Sprite Fusion (PNG, legend JSON, README).
+
+    Args:
+        out_dir: Folder to write to (any absolute path); default <state dir>/sprite-fusion
+    """
+    out = Path(out_dir) if out_dir else safety.state_dir() / "sprite-fusion"
+    files = sprite_fusion.make_tileset(out)
+    return ("Wrote:\n" + "\n".join(f"  {f}" for f in files) +
+            "\nImport celeste_graybox.png in Sprite Fusion with tile size 16. Tile order: "
+            + ", ".join(sprite_fusion.GRAYBOX_ORDER) + ".")
+
+
+def _auto_position(tree: dict, w: int, h: int) -> tuple[int, int]:
+    rooms = cb.get_rooms(tree)
+    if not rooms:
+        return 0, 0
+    right = max(r.get("x", 0) + r.get("width", 0) for r in rooms)
+    top = min(r.get("y", 0) for r in rooms)
+    return ((right + 64 + 7) // 8) * 8, (top // 8) * 8
+
+
+@tool()
+def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, y: int | None = None,
+              legend_path: str = "", replace: bool = False, output_path: str = "", dry_run: bool = True,
+              allow_unknown: bool = False, allow_problems: bool = False) -> str:
+    """Import a Sprite Fusion JSON export (map.zip) as a Celeste room: solid/bg tiles plus gray-box entities.
+
+    One Sprite Fusion cell = one 8x8 tile. A new room is added; an existing one is only changed with replace=true
+    (its fg/bg tiles and entities are replaced; triggers, decals and settings stay).
+
+    Args:
+        export_path: map.zip, its folder, or map.json (any absolute path)
+        map_path: Map to import into (the base when output_path is set)
+        room: Room name (lvl_ is added if the map's rooms use it)
+        x: Room x in pixels for a new room; default: right of the existing rooms
+        y: Room y in pixels for a new room
+        legend_path: Custom legend JSON; default: the built-in gray-box legend
+        replace: Replace an existing room's tiles and entities
+        output_path: Write to this .bin instead of map_path (created from map_path if missing)
+        dry_run: Only show the result (default)
+        allow_unknown: Place names with no Lönn definition
+        allow_problems: Write even when placement checks fail
+    """
+    src = _resolve(map_path)
+    if not src.exists():
+        return f"File not found: {map_path}"
+    out = _resolve(output_path) if output_path else src
+    try:
+        exp = sprite_fusion.load_export(Path(export_path))
+        legend = sprite_fusion.load_legend(Path(legend_path) if legend_path else None)
+        conv = sprite_fusion.convert(exp, legend)
+    except (sprite_fusion.SpriteFusionError, OSError, json.JSONDecodeError) as exc:
+        return f"Cannot read the export: {exc}"
+    base = out.read_bytes() if out.exists() else src.read_bytes()
+    tree = cb.read_map_bytes(base)
+    rooms = cb.get_rooms(tree)
+    prefixed = bool(rooms) and all(str(r.get("name", "")).startswith("lvl_") for r in rooms)
+    full = room if room.startswith("lvl_") or not prefixed else f"lvl_{room}"
+    existing = authoring._find_room(tree, full)
+    W, H = conv.width_tiles * 8, conv.height_tiles * 8
+    try:
+        if existing is None:
+            if x is None or y is None:
+                x, y = _auto_position(tree, W, H)
+            new_bytes, res = authoring.merge_bytes(base, conv.room_doc(full, x, y), _catalog(),
+                                                   allow_unknown=allow_unknown)
+            detail = authoring.describe(res)
+            problems = res.problems
+            action = f"new room {full} at ({x}, {y}), {W}x{H}"
+        else:
+            if not replace:
+                return (f"Room {existing.get('name')} already exists. Pass replace=true to replace its tiles and "
+                        "entities, or pick another room name.")
+            if (existing.get("width"), existing.get("height")) != (W, H):
+                return (f"Room {existing.get('name')} is {existing.get('width')}x{existing.get('height')} px but the "
+                        f"export is {W}x{H}. Resize one of them first (resize_room).")
+            plan = authoring.resolve({"room": existing.get("name"), "entities": conv.entities}, _catalog())
+            if plan.unknown and not allow_unknown:
+                return ("Not imported: unknown names (no Lönn definition): "
+                        + ", ".join(sorted({it.name for it in plan.unknown})))
+            ents = cb.find_child(existing, "entities")
+            if ents is None:
+                ents = {"__name": "entities", "__children": []}
+                existing["__children"].append(ents)
+            removed = len(ents["__children"])
+            keep_ids = authoring.map_ids(tree) - {e.get("id") for e in ents["__children"]}
+            ids = authoring.IdAllocator(keep_ids)
+            ents["__children"] = [authoring._element(it, ids.take(it.id, it.label())) for it in plan.items()]
+            for child, rows in (("solids", conv.fg), ("bg", conv.bg)):
+                el = cb.find_child(existing, child)
+                if el is None:
+                    el = {"__name": child, "offsetX": 0, "offsetY": 0, "__children": []}
+                    existing["__children"].append(el)
+                el["innerText"] = "\n".join(rows)
+            reach = authoring._ReachCache(tree)
+            problems = [f"{existing.get('name')}: {e.get('__name')} id={e.get('id')}: {p}"
+                        for e in ents["__children"] for p in authoring.check_placement(existing, e, "entities", reach)]
+            new_bytes = cb.serialize_map(tree)
+            detail = f"replaced tiles and {removed} entit{'y' if removed == 1 else 'ies'} with {len(ents['__children'])}"
+            action = f"replace room {existing.get('name')}"
+    except (authoring.AuthoringError, ValueError) as exc:
+        return f"Not imported: {exc}"
+    lines = [f"{'DRY RUN, nothing written' if dry_run else 'IMPORT'}: {Path(export_path).name} -> {_rel(out)}: {action}",
+             detail, "", "Preview (P player, ^ spikes, S spring, R refill, B berry, = jump-through, D dream block):",
+             conv.preview()]
+    lines += [f"Note: {n}" for n in conv.notes]
+    if problems:
+        lines.append("Placement problems:")
+        lines += [f"  {p}" for p in problems]
+    if dry_run:
+        lines.append("\nRun again with dry_run=false to write.")
+        return "\n".join(lines)
+    if problems and not allow_problems:
+        lines.append("\nNot written: fix the placement problems, or pass allow_problems=true.")
+        return "\n".join(lines)
+    _save_bytes(out, new_bytes)
+    return "\n".join(lines)
+
+
+# Hide the extra tools unless asked for (LOENN_MCP_TOOLS=all).
+if os.environ.get("LOENN_MCP_TOOLS", "core").lower() != "all":
+    mcp.disable(names=set(_EXTRA_TOOLS))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -598,10 +598,17 @@ def check_placement(room: dict, el: dict, section: str, reach=None) -> list[str]
         return out
 
     grid = TileGrid(room)
+    standing = (not (ew or eh) and float(y).is_integer() and int(y) % 8 == 0 and y > 0
+                and grid.solid(int(x) // 8, int(y) // 8) and not grid.solid(int(x) // 8, int(y) // 8 - 1))
     name = str(el.get("__name", "")).lower()
     half = 6 if any(h_ in name for h_ in _COLLECTIBLE_HINTS) else 3
     if ew or eh:
         box = (x, y, x + ew, y + eh)
+    elif standing:
+        # Bottom-anchored (player, spring, ...) exactly on the floor line: it stands on the
+        # floor, so check the space above its feet instead of the floor tile under them.
+        box = (x - half, y - 2 * half, x + half, y)
+        y = y - 1
     else:
         box = (x - half, y - half, x + half, y + half)
     cells = [(tx, ty) for ty in range(int(box[1]) // 8, (int(box[3]) - 1) // 8 + 1)
