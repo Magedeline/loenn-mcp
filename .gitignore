@@ -27,3 +27,8 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# C# build output
+csharp/**/bin/
+csharp/**/obj/
+csharp/**/TestResults/

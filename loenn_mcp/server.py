@@ -41,6 +41,7 @@ Tools (categories):
   Sprite Fusion:    sf_make_tileset, sf_import
   Summer Engine:    summer_init, summer_open, summer_rooms, summer_export_room,
                     summer_import_room, summer_from_sprite_fusion
+  PCG core:         pcg_generate_room
 
 All tools are deterministic/procedural — no AI models, no network calls to
 LLM APIs. (The former ai_* tools were removed in v7.0.0.)
@@ -78,7 +79,7 @@ try:
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
-    from . import safety, mapdiff, assets, sprite_fusion, editors, summer
+    from . import safety, mapdiff, assets, sprite_fusion, editors, summer, pcg_core
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import map_json                          # run directly from source
@@ -88,7 +89,7 @@ except ImportError:
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
     import gdep_tools                        # run directly from source
-    import safety, mapdiff, assets, sprite_fusion, editors, summer
+    import safety, mapdiff, assets, sprite_fusion, editors, summer, pcg_core
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -107,6 +108,7 @@ mcp = FastMCP(
         "writes to a map that is open in an editor are refused. "
         "Gray-box rooms painted in Sprite Fusion come in with sf_import (tileset from sf_make_tileset); "
         "rooms painted as Summer Engine scenes come in with summer_export_room (summer_init, summer_open). "
+        "pcg_generate_room makes a reach-checked gray-box room with the shared C# PCG core. "
         "Game: game_teleport, game_reload_map, game_play_tas need Celeste running with Everest debug mode."
     ),
 )
@@ -6302,6 +6304,7 @@ def _import_conversion(conv: "sprite_fusion.Conversion", source_label: str, map_
                     existing["__children"].append(el)
                 old_rows = el.get("innerText", "").split("\n")
                 el["innerText"] = "\n".join(_keep_tile_chars(old_rows, rows))
+            existing.update(conv.attrs)
             reach = authoring._ReachCache(tree)
             problems = [f"{existing.get('name')}: {e.get('__name')} id={e.get('id')}: {p}"
                         for e in ents["__children"] for p in authoring.check_placement(existing, e, "entities", reach)]
@@ -6500,6 +6503,54 @@ def summer_from_sprite_fusion(export_path: str, scene: str, overwrite: bool = Fa
         return f"Not converted: {exc}"
     return "\n".join([f"Wrote {res_path} from {Path(export_path).name}.", *[f"Note: {n}" for n in conv.notes + notes],
                       f"Refine it with summer_open(scene='{name}'), then summer_export_room."])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SHARED PCG CORE (csharp/CelPcg.Core through the celpcg CLI)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tool()
+def pcg_generate_room(map_path: str, room: str, exits: str = "left:16:4,right:16:4", width: int = 40,
+                      height: int = 23, difficulty: int = 3, seed: int | None = None, entry: int = 0,
+                      fg: str = "1", bg: str = "1", x: int | None = None, y: int | None = None,
+                      replace: bool = False, output_path: str = "", dry_run: bool = True,
+                      allow_problems: bool = False) -> str:
+    """Generate a gray-box room with the shared C# PCG core and write it into a map (dry run first).
+
+    The room is only returned if the core's reach check proves every exit reachable from the entry
+    without climbing. Same seed + settings = same room; the seed is stored on the room (celpcg_seed).
+
+    Args:
+        map_path: Map to write into (the base when output_path is set)
+        room: Room name (lvl_ is added if the map's rooms use it)
+        exits: Comma list of side:offset:size in tiles (side left/right/top/bottom; offset = first row or column)
+        width: Room width in tiles (40 = one screen)
+        height: Room height in tiles (23 = one screen)
+        difficulty: 1 (gentle) to 10 (hard): hop length, spikes, jump-throughs, refills
+        seed: Seed; default derived from the map path and room name
+        entry: Index in exits of the exit the player enters by (must be left or right)
+        fg: Foreground tileset character for solid tiles
+        bg: Background tileset character
+        x: Room x in pixels for a new room; default: right of the existing rooms
+        y: Room y in pixels for a new room
+        replace: Replace an existing room's tiles and entities (solid cells keep their tileset)
+        output_path: Write to this .bin instead of map_path
+        dry_run: Only show the result (default)
+        allow_problems: Write even when placement checks fail
+    """
+    path = _resolve(map_path)
+    if seed is None:
+        seed = pcg_core.default_seed(_rel(path), mapdiff.short_name(room))
+    request = {"room": room, "width": width, "height": height, "difficulty": difficulty, "seed": seed,
+               "entry": entry, "fg": fg[:1] or "1", "bg": bg[:1] or "1",
+               "exits": [e.strip() for e in exits.split(",") if e.strip()]}
+    try:
+        doc = pcg_core.generate(request)
+    except pcg_core.PcgError as exc:
+        return f"Not generated: {exc}"
+    conv = pcg_core.to_conversion(doc)
+    return _import_conversion(conv, f"celpcg seed {seed}", map_path, room, x, y, replace, output_path,
+                              dry_run, False, allow_problems)
 
 
 # Hide the extra tools unless asked for (LOENN_MCP_TOOLS=all).

@@ -397,12 +397,15 @@ class Conversion:
     notes: list[str] = field(default_factory=list)
     unmatched: dict[str, int] = field(default_factory=dict)
     decoration: int = 0
+    attrs: dict[str, Any] = field(default_factory=dict)   # extra level attributes (e.g. generator seed)
 
     def room_doc(self, name: str, x: int | None = None, y: int | None = None) -> dict:
         d: dict[str, Any] = {"room": name, "solids": "\n".join(self.fg), "bg": "\n".join(self.bg),
                              "entities": self.entities}
         if x is not None and y is not None:
             d.update({"x": x, "y": y, "width": self.width_tiles * 8, "height": self.height_tiles * 8})
+            if self.attrs:
+                d["attrs"] = dict(self.attrs)
         return d
 
     def preview(self) -> str:

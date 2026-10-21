@@ -46,6 +46,15 @@ Summer Engine:
     Rooms round-trip Celeste -> scene -> Celeste with the same entities and
     tiles; replace keeps each solid cell's tileset character.
 
+Shared PCG core (phase 2 slice):
+  - csharp/CelPcg.Core (netstandard2.0): PCG32, seed derivation, room
+    model, reach model ported from reach.py, validator, platform-chain
+    generator. csharp/CelPcg.Cli (celpcg) and xunit tests.
+  - pcg_generate_room: reach-checked gray-box rooms written through the
+    shared import path; the seed is stored on the room.
+  - Verified end to end on CEL: generated into Maps/CEL/wip/pcg_slice.bin,
+    opened in Lönn on the room, loaded in game with game_teleport.
+
 Other:
   - Tool descriptions are trimmed to one paragraph (parameter docs stay);
     18 extra tools are hidden unless LOENN_MCP_TOOLS=all.

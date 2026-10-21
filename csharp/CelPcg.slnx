@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="CelPcg.Cli/CelPcg.Cli.csproj" />
+  <Project Path="CelPcg.Core/CelPcg.Core.csproj" />
+  <Project Path="CelPcg.Tests/CelPcg.Tests.csproj" />
+</Solution>
