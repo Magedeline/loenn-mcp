@@ -415,13 +415,14 @@ class Conversion:
         return "\n".join("".join(r) for r in grid)
 
 
-def convert(export: Export, legend: dict) -> Conversion:
+def convert(export: Export, legend: dict, by_id_ok: bool = False) -> Conversion:
+    """by_id_ok: the export's ids already are legend indexes (Summer scenes), so no matching note."""
     doc = export.doc
     W, H = int(doc["mapWidth"]), int(doc["mapHeight"])
     if W <= 0 or H <= 0:
         raise SpriteFusionError("map has no size")
     notes: list[str] = []
-    kinds_by_id = map_ids(export, legend, notes)
+    kinds_by_id = map_ids(export, legend, [] if by_id_ok else notes)
     kind_specs = dict(KINDS)
     kind_specs.update(legend.get("kinds", {}))
     fg = [["0"] * W for _ in range(H)]
@@ -444,6 +445,8 @@ def convert(export: Export, legend: dict) -> Conversion:
                 name = str(attrs.pop("entity"))
                 anchor = str(attrs.pop("anchor", "topleft"))
                 ex, ey = _anchor(anchor, x, y)
+                if "px" in attrs and "py" in attrs:          # exact Celeste pixels (Summer markers)
+                    ex, ey = int(attrs.pop("px")), int(attrs.pop("py"))
                 singles.append({"name": name, "x": ex, "y": ey, **attrs})
                 continue
             kind = kinds_by_id.get(str(t.get("id")), "")

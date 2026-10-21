@@ -39,6 +39,8 @@ Tools (categories):
   Editors:          editor_open, editor_wait, editor_status, editor_close
   Assets:           check_assets, check_sprites_xml
   Sprite Fusion:    sf_make_tileset, sf_import
+  Summer Engine:    summer_init, summer_open, summer_rooms, summer_export_room,
+                    summer_import_room, summer_from_sprite_fusion
 
 All tools are deterministic/procedural — no AI models, no network calls to
 LLM APIs. (The former ai_* tools were removed in v7.0.0.)
@@ -76,7 +78,7 @@ try:
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
-    from . import safety, mapdiff, assets, sprite_fusion, editors
+    from . import safety, mapdiff, assets, sprite_fusion, editors, summer
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import map_json                          # run directly from source
@@ -86,7 +88,7 @@ except ImportError:
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
     import gdep_tools                        # run directly from source
-    import safety, mapdiff, assets, sprite_fusion, editors
+    import safety, mapdiff, assets, sprite_fusion, editors, summer
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -103,7 +105,8 @@ mcp = FastMCP(
         "Check: validate_map, check_assets (names and textures exist), check_sprites_xml. "
         "Editor: editor_open opens a map (and room) in Lönn, editor_wait returns when the user saved; "
         "writes to a map that is open in an editor are refused. "
-        "Gray-box rooms painted in Sprite Fusion come in with sf_import (tileset from sf_make_tileset). "
+        "Gray-box rooms painted in Sprite Fusion come in with sf_import (tileset from sf_make_tileset); "
+        "rooms painted as Summer Engine scenes come in with summer_export_room (summer_init, summer_open). "
         "Game: game_teleport, game_reload_map, game_play_tas need Celeste running with Everest debug mode."
     ),
 )
@@ -6239,38 +6242,24 @@ def _auto_position(tree: dict, w: int, h: int) -> tuple[int, int]:
     return ((right + 64 + 7) // 8) * 8, (top // 8) * 8
 
 
-@tool()
-def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, y: int | None = None,
-              legend_path: str = "", replace: bool = False, output_path: str = "", dry_run: bool = True,
-              allow_unknown: bool = False, allow_problems: bool = False) -> str:
-    """Import a Sprite Fusion JSON export (map.zip) as a Celeste room: solid/bg tiles plus gray-box entities.
+def _keep_tile_chars(old_rows: list[str], new_rows: list[str]) -> list[str]:
+    """Where a cell is solid before and after, keep the old tileset character (gray-box edits keep tilesets)."""
+    out = []
+    for y, row in enumerate(new_rows):
+        old = old_rows[y] if y < len(old_rows) else ""
+        out.append("".join(o if c != "0" and x < len(old) and old[x] not in "0" and (o := old[x]) else c
+                           for x, c in enumerate(row)))
+    return out
 
-    One Sprite Fusion cell = one 8x8 tile. A new room is added; an existing one is only changed with replace=true
-    (its fg/bg tiles and entities are replaced; triggers, decals and settings stay).
 
-    Args:
-        export_path: map.zip, its folder, or map.json (any absolute path)
-        map_path: Map to import into (the base when output_path is set)
-        room: Room name (lvl_ is added if the map's rooms use it)
-        x: Room x in pixels for a new room; default: right of the existing rooms
-        y: Room y in pixels for a new room
-        legend_path: Custom legend JSON; default: the built-in gray-box legend
-        replace: Replace an existing room's tiles and entities
-        output_path: Write to this .bin instead of map_path (created from map_path if missing)
-        dry_run: Only show the result (default)
-        allow_unknown: Place names with no Lönn definition
-        allow_problems: Write even when placement checks fail
-    """
+def _import_conversion(conv: "sprite_fusion.Conversion", source_label: str, map_path: str, room: str,
+                       x: int | None, y: int | None, replace: bool, output_path: str, dry_run: bool,
+                       allow_unknown: bool, allow_problems: bool) -> str:
+    """Shared by sf_import and summer_export_room: add or replace a room built from a gray-box conversion."""
     src = _resolve(map_path)
     if not src.exists():
         return f"File not found: {map_path}"
     out = _resolve(output_path) if output_path else src
-    try:
-        exp = sprite_fusion.load_export(Path(export_path))
-        legend = sprite_fusion.load_legend(Path(legend_path) if legend_path else None)
-        conv = sprite_fusion.convert(exp, legend)
-    except (sprite_fusion.SpriteFusionError, OSError, json.JSONDecodeError) as exc:
-        return f"Cannot read the export: {exc}"
     base = out.read_bytes() if out.exists() else src.read_bytes()
     tree = cb.read_map_bytes(base)
     rooms = cb.get_rooms(tree)
@@ -6293,7 +6282,7 @@ def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, 
                         "entities, or pick another room name.")
             if (existing.get("width"), existing.get("height")) != (W, H):
                 return (f"Room {existing.get('name')} is {existing.get('width')}x{existing.get('height')} px but the "
-                        f"export is {W}x{H}. Resize one of them first (resize_room).")
+                        f"source is {W}x{H}. Resize one of them first (resize_room).")
             plan = authoring.resolve({"room": existing.get("name"), "entities": conv.entities}, _catalog())
             if plan.unknown and not allow_unknown:
                 return ("Not imported: unknown names (no Lönn definition): "
@@ -6311,7 +6300,8 @@ def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, 
                 if el is None:
                     el = {"__name": child, "offsetX": 0, "offsetY": 0, "__children": []}
                     existing["__children"].append(el)
-                el["innerText"] = "\n".join(rows)
+                old_rows = el.get("innerText", "").split("\n")
+                el["innerText"] = "\n".join(_keep_tile_chars(old_rows, rows))
             reach = authoring._ReachCache(tree)
             problems = [f"{existing.get('name')}: {e.get('__name')} id={e.get('id')}: {p}"
                         for e in ents["__children"] for p in authoring.check_placement(existing, e, "entities", reach)]
@@ -6320,9 +6310,9 @@ def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, 
             action = f"replace room {existing.get('name')}"
     except (authoring.AuthoringError, ValueError) as exc:
         return f"Not imported: {exc}"
-    lines = [f"{'DRY RUN, nothing written' if dry_run else 'IMPORT'}: {Path(export_path).name} -> {_rel(out)}: {action}",
-             detail, "", "Preview (P player, ^ spikes, S spring, R refill, B berry, = jump-through, D dream block):",
-             conv.preview()]
+    lines = [f"{'DRY RUN, nothing written' if dry_run else 'IMPORT'}: {source_label} -> {_rel(out)}: {action}",
+             detail, "", "Preview (P player, ^ spikes, S spring, R refill, B berry, = jump-through, D dream block, "
+             "E other entity):", conv.preview()]
     lines += [f"Note: {n}" for n in conv.notes]
     if problems:
         lines.append("Placement problems:")
@@ -6335,6 +6325,181 @@ def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, 
         return "\n".join(lines)
     _save_bytes(out, new_bytes)
     return "\n".join(lines)
+
+
+@tool()
+def sf_import(export_path: str, map_path: str, room: str, x: int | None = None, y: int | None = None,
+              legend_path: str = "", replace: bool = False, output_path: str = "", dry_run: bool = True,
+              allow_unknown: bool = False, allow_problems: bool = False) -> str:
+    """Import a Sprite Fusion JSON export (map.zip) as a Celeste room: solid/bg tiles plus gray-box entities.
+
+    Args:
+        export_path: map.zip, its folder, or map.json (any absolute path)
+        map_path: Map to import into (the base when output_path is set)
+        room: Room name (lvl_ is added if the map's rooms use it)
+        x: Room x in pixels for a new room; default: right of the existing rooms
+        y: Room y in pixels for a new room
+        legend_path: Custom legend JSON; default: the built-in gray-box legend
+        replace: Replace an existing room's fg/bg tiles and entities (triggers, decals, settings stay; solid cells keep their tileset)
+        output_path: Write to this .bin instead of map_path (created from map_path if missing)
+        dry_run: Only show the result (default)
+        allow_unknown: Place names with no Lönn definition
+        allow_problems: Write even when placement checks fail
+    """
+    try:
+        exp = sprite_fusion.load_export(Path(export_path))
+        legend = sprite_fusion.load_legend(Path(legend_path) if legend_path else None)
+        conv = sprite_fusion.convert(exp, legend)
+    except (sprite_fusion.SpriteFusionError, OSError, json.JSONDecodeError) as exc:
+        return f"Cannot read the export: {exc}"
+    return _import_conversion(conv, Path(export_path).name, map_path, room, x, y, replace, output_path,
+                              dry_run, allow_unknown, allow_problems)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SUMMER ENGINE (gray-box rooms as Godot scenes)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _summer_project(project_dir: str) -> Path:
+    return Path(project_dir) if project_dir else summer.default_project()
+
+
+@tool()
+def summer_init(project_dir: str = "") -> str:
+    """Create or refresh the Summer Engine gray-box project (tileset with collision, room template, bridge scripts).
+
+    Args:
+        project_dir: Project folder; default ~/Documents/CEL-Graybox (LOENN_MCP_SUMMER_PROJECT)
+    """
+    try:
+        proj, notes = summer.init_project(_summer_project(project_dir))
+    except summer.SummerError as exc:
+        return f"Summer error: {exc}"
+    return (f"Summer project ready: {proj}\n" + "\n".join(f"  {n}" for n in notes) +
+            f"\nRooms: {', '.join(summer.list_rooms(proj)) or 'none yet'}. Open it with summer_open, paint rooms/"
+            "<name>.tscn (fg = solid, bg, gameplay), then summer_export_room.")
+
+
+@tool()
+def summer_open(scene: str = "", project_dir: str = "") -> str:
+    """Open the gray-box project in Summer Engine, optionally on a room scene.
+
+    Args:
+        scene: Room name, project path (rooms/x.tscn) or res:// path; empty = just the project
+        project_dir: Project folder; default ~/Documents/CEL-Graybox
+    """
+    try:
+        proj = summer.ensure_project(_summer_project(project_dir))
+        proc = summer.open_editor(proj, scene or None)
+    except summer.SummerError as exc:
+        return f"Summer error: {exc}"
+    return (f"Summer Engine started (pid {proc.pid}) on {proj}" + (f", scene {scene}" if scene else "") +
+            ". Save the scene in Summer (Ctrl+S) before summer_export_room reads it.")
+
+
+@tool()
+def summer_rooms(project_dir: str = "") -> str:
+    """List the room scenes in the Summer gray-box project.
+
+    Args:
+        project_dir: Project folder; default ~/Documents/CEL-Graybox
+    """
+    proj = _summer_project(project_dir)
+    if not (proj / "project.godot").exists():
+        return f"No Summer project at {proj}. Run summer_init."
+    rooms = summer.list_rooms(proj)
+    return f"{proj}\\rooms: " + (", ".join(rooms) if rooms else "no rooms yet")
+
+
+@tool()
+def summer_export_room(scene: str, map_path: str, room: str = "", x: int | None = None, y: int | None = None,
+                       replace: bool = False, output_path: str = "", dry_run: bool = True, allow_unknown: bool = False,
+                       allow_problems: bool = False, project_dir: str = "") -> str:
+    """Turn a Summer room scene into a Celeste room (new, or replace=true). Same checks and safe write as sf_import.
+
+    Args:
+        scene: Room name, rooms/x.tscn or res:// path in the Summer project
+        map_path: Map to write into (the base when output_path is set)
+        room: Celeste room name; default: the scene's celeste_room metadata, else the scene name
+        x: Room x in pixels for a new room; default: right of the existing rooms
+        y: Room y in pixels for a new room
+        replace: Replace an existing room's fg/bg tiles and entities (solid cells keep their tileset)
+        output_path: Write to this .bin instead of map_path
+        dry_run: Only show the result (default)
+        allow_unknown: Place marker entities with no Lönn definition
+        allow_problems: Write even when placement checks fail
+        project_dir: Project folder; default ~/Documents/CEL-Graybox
+    """
+    try:
+        dump = summer.export_scene(_summer_project(project_dir), scene)
+        conv, meta_room = summer.scene_conversion(dump)
+    except (summer.SummerError, sprite_fusion.SpriteFusionError) as exc:
+        return f"Summer error: {exc}"
+    name = room or meta_room or Path(scene).stem
+    return _import_conversion(conv, f"Summer {dump.get('scene')}", map_path, name, x, y, replace, output_path,
+                              dry_run, allow_unknown, allow_problems)
+
+
+@tool()
+def summer_import_room(map_path: str, room: str, scene: str = "", overwrite: bool = False,
+                       project_dir: str = "") -> str:
+    """Copy a Celeste room into the Summer project as a scene (fg/bg tiles, gray-box entities as tiles, others as markers).
+
+    Args:
+        map_path: Map holding the room
+        room: Room name
+        scene: Scene to write; default rooms/<room>.tscn
+        overwrite: Replace an existing scene
+        project_dir: Project folder; default ~/Documents/CEL-Graybox
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    r = authoring._find_room(cb.read_map(path), room)
+    if r is None:
+        return f"Room '{room}' not found in {map_path}."
+    short = mapdiff.short_name(str(r.get("name")))
+    ins, notes = summer.room_instructions(r)
+    try:
+        res_path = summer.import_room(_summer_project(project_dir), scene or short, short, ins, overwrite)
+    except summer.SummerError as exc:
+        return f"Summer error: {exc}"
+    counts = ", ".join(f"{k} {len(v)}" for k, v in ins["layers"].items())
+    lines = [f"Wrote {res_path} from {_rel(path)} room {short} ({ins['width']}x{ins['height']} tiles; cells: {counts}; "
+             f"{len(ins['markers'])} marker entit{'y' if len(ins['markers']) == 1 else 'ies'})."]
+    lines += [f"Note: {n}" for n in notes]
+    lines.append(f"Edit it with summer_open(scene='{short}'), then summer_export_room(scene='{short}', "
+                 f"map_path=..., replace=true).")
+    return "\n".join(lines)
+
+
+@tool()
+def summer_from_sprite_fusion(export_path: str, scene: str, overwrite: bool = False, legend_path: str = "",
+                              project_dir: str = "") -> str:
+    """Turn a Sprite Fusion export (map.zip) into a Summer room scene, to refine it in Summer before export.
+
+    Args:
+        export_path: map.zip, its folder, or map.json
+        scene: Room/scene name to create (rooms/<scene>.tscn)
+        overwrite: Replace an existing scene
+        legend_path: Custom legend JSON; default: the built-in gray-box legend
+        project_dir: Project folder; default ~/Documents/CEL-Graybox
+    """
+    try:
+        exp = sprite_fusion.load_export(Path(export_path))
+        conv = sprite_fusion.convert(exp, sprite_fusion.load_legend(Path(legend_path) if legend_path else None))
+        name = Path(scene).stem
+        tmp_room = authoring._new_room(authoring.RoomSpec(name, {"x": 0, "y": 0, "width": conv.width_tiles * 8,
+                                                                 "height": conv.height_tiles * 8},
+                                                          {"solids": "\n".join(conv.fg), "bg": "\n".join(conv.bg)}, []))
+        cb.find_child(tmp_room, "entities")["__children"] = [
+            {"__name": e["name"], **{k: v for k, v in e.items() if k != "name"}, "__children": []} for e in conv.entities]
+        ins, notes = summer.room_instructions(tmp_room)
+        res_path = summer.import_room(_summer_project(project_dir), scene, name, ins, overwrite)
+    except (sprite_fusion.SpriteFusionError, summer.SummerError, OSError, json.JSONDecodeError) as exc:
+        return f"Not converted: {exc}"
+    return "\n".join([f"Wrote {res_path} from {Path(export_path).name}.", *[f"Note: {n}" for n in conv.notes + notes],
+                      f"Refine it with summer_open(scene='{name}'), then summer_export_room."])
 
 
 # Hide the extra tools unless asked for (LOENN_MCP_TOOLS=all).

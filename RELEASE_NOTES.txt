@@ -39,6 +39,13 @@ Sprite Fusion:
     Sprite Fusion JSON export into a room (new, or replace=true), matching
     tiles by pixels because export ids index the exported sheet.
 
+Summer Engine:
+  - summer_init, summer_open, summer_rooms, summer_export_room,
+    summer_import_room, summer_from_sprite_fusion: gray-box rooms as Godot
+    scenes in Summer Engine 0.7.3, through its headless editor-script mode.
+    Rooms round-trip Celeste -> scene -> Celeste with the same entities and
+    tiles; replace keeps each solid cell's tileset character.
+
 Other:
   - Tool descriptions are trimmed to one paragraph (parameter docs stay);
     18 extra tools are hidden unless LOENN_MCP_TOOLS=all.
