@@ -465,9 +465,14 @@ def write_map(path: str | Path, data: dict, header: str = "CELESTE MAP",
       4. rotate rolling backups of the existing file (backup=True)
       5. atomically replace the target with the temp file
     """
-    path = Path(path)
-    payload = serialize_map(data, header)
+    write_map_bytes(path, serialize_map(data, header), header, backup, validate)
 
+
+def write_map_bytes(path: str | Path, payload: bytes, header: str = "CELESTE MAP",
+                    backup: bool = True, validate: bool = True):
+    """Write already-serialized map bytes with the same safety steps as write_map:
+    parse check, temp file, rolling backups, atomic replace."""
+    path = Path(path)
     if validate:
         try:
             read_map_bytes(payload, expected_header=header)

@@ -64,12 +64,18 @@ from fastmcp import FastMCP
 
 try:
     from . import celeste_bin as cb          # installed package
+    from . import map_json                   # installed package
+    from . import authoring                  # installed package
+    from . import lua_defs                   # installed package
     from . import pcg                        # installed package
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
 except ImportError:
     import celeste_bin as cb                 # run directly from source
+    import map_json                          # run directly from source
+    import authoring                         # run directly from source
+    import lua_defs                          # run directly from source
     import pcg                               # run directly from source
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
@@ -1806,12 +1812,48 @@ def _html_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _overlay_svg(added: list[dict], rx: float, ry: float) -> str:
+    """Rings around objects a planned merge would add (red when a check failed)."""
+    out = []
+    for a in added:
+        bad = bool(a.get("problems"))
+        color = "#ff3b3b" if bad else "#ff4dff"
+        kind = "trigger" if a["kind"] == "triggers" else "entity"
+        tip = _html_escape(f"NEW {kind} {a['name']} id={a['id']} at ({a['x']:g},{a['y']:g})"
+                           + "".join(f"\n✗ {p}" for p in a.get("problems", [])))
+        if a.get("width") or a.get("height"):
+            out.append(f'<rect class="ov" x="{rx + a["x"]:g}" y="{ry + a["y"]:g}" width="{a["width"] or 4:g}" '
+                       f'height="{a["height"] or 4:g}" fill="{color}" fill-opacity="0.18" stroke="{color}" '
+                       f'stroke-width="2" stroke-dasharray="4 2"><title>{tip}</title></rect>')
+        else:
+            out.append(f'<circle class="ov" cx="{rx + a["x"]:g}" cy="{ry + a["y"]:g}" r="9" fill="none" '
+                       f'stroke="{color}" stroke-width="2.5"><title>{tip}</title></circle>'
+                       f'<circle cx="{rx + a["x"]:g}" cy="{ry + a["y"]:g}" r="3" fill="{color}" '
+                       f'pointer-events="none"/>')
+    return "".join(out)
+
+
+def _load_map_any(path: Path) -> dict:
+    """Element tree from a .bin map or a typed JSON dump (map_to_json)."""
+    if path.suffix.lower() == ".json":
+        return map_json.json_to_tree(json.loads(path.read_text(encoding="utf-8")))
+    return cb.read_map(path)
+
+
+def _room_matches(name: str, prefix: str) -> bool:
+    """Prefix match on the room name with or without its 'lvl_' prefix."""
+    short = name[4:] if name.startswith("lvl_") else name
+    p = prefix[4:] if prefix.startswith("lvl_") else prefix
+    return short.startswith(p)
+
+
 @mcp.tool()
 def render_map_html(
     map_path: str,
     prefix: str = "",
     output_file: str = "",
     detail: bool = True,
+    overlay: str = "",
 ) -> str:
     """Render an interactive HTML map preview with zoom, pan, search, and detail panel.
 
@@ -1820,29 +1862,49 @@ def render_map_html(
     viewport indicator, toggleable grid and labels, keyboard shortcuts.
 
     Args:
-        map_path: Path to the .bin file
-        prefix: Only show rooms matching this prefix (e.g. "g-", "w-")
+        map_path: Path to a .bin file, or to a typed JSON dump made by map_to_json
+        prefix: Only show rooms matching this prefix (e.g. "g-", "w-"); works
+            whether or not the map's room names carry 'lvl_'
         output_file: Output HTML filename (default: map_preview.html in Temp/)
         detail: Draw each room's solid/background tiles and entity markers
             (hazards red, collectibles gold, spawns green, refills light green).
             False draws room boxes only.
+        overlay: Authoring JSON (inline, or a path to a .json file) to preview
+            as a merge: it is applied in memory only, and every object it would
+            add is ringed in magenta (red when a placement check failed).
+            Nothing is written to the map.
     """
     import json as _json
 
     path = _resolve(map_path)
-    data = cb.read_map(path)
+    data = _load_map_any(path)
+    highlights: dict[str, list[dict]] = {}
+    overlay_note = ""
+    if overlay.strip():
+        try:
+            doc = authoring.load_doc(overlay, WORKSPACE)
+            _, res = authoring.merge_bytes(cb.serialize_map(data), doc, _catalog(), allow_unknown=True)
+        except (authoring.AuthoringError, map_json.MapJsonError, ValueError, OSError) as exc:
+            return f"Cannot preview overlay: {exc}"
+        data = res.tree
+        for a in authoring.overlay_from_result(res):
+            highlights.setdefault(a["room"], []).append(a)
     all_rooms = cb.get_rooms(data)
 
     if not all_rooms:
         return "No rooms in this map."
 
     if prefix:
-        pfx = prefix if prefix.startswith("lvl_") else f"lvl_{prefix}"
-        rooms = [r for r in all_rooms if r.get("name", "").startswith(pfx)]
+        rooms = [r for r in all_rooms if _room_matches(r.get("name", ""), prefix)]
         if not rooms:
             return f"No rooms matching prefix '{prefix}'."
     else:
         rooms = all_rooms
+    if highlights:
+        shown = [a for r in rooms for a in highlights.get(r.get("name", ""), [])]
+        n_bad = sum(1 for a in shown if a["problems"])
+        overlay_note = (f"\nPlanned additions highlighted: {len(shown)} "
+                        f"({n_bad} with placement problems, shown red)")
 
     # World bounds
     min_x = min(r.get("x", 0) for r in rooms)
@@ -1934,10 +1996,15 @@ def render_map_html(
         disp_label = (badge_str + " " if badge_str else "") + name
         sub_label = f"{ent_count}e · {trigger_count}t · {rw}×{rh}"
 
+        added = highlights.get(room.get("name", ""), [])
+        if added:
+            badges.append(f"✚{len(added)}")
+            disp_label = " ".join(badges) + " " + name
         g_parts = [
             f'<rect class="rb" x="{rx}" y="{ry}" width="{rw}" height="{rh}" '
             f'fill="{color}" fill-opacity="{0.22 if detail else 0.72}" stroke="{stroke}" stroke-width="{stroke_w}" rx="4"/>',
             _room_detail_svg(room, rx, ry) if detail else "",
+            _overlay_svg(added, rx, ry),
             f'<rect class="rh" x="{rx}" y="{ry}" width="{rw}" height="{rh}" '
             f'fill="none" stroke="transparent" rx="4" pointer-events="none"/>',
             f'<text class="ln" x="{lx:.1f}" y="{ly:.1f}" '
@@ -2403,12 +2470,13 @@ fitToWindow(); apply();
     if not output_file:
         out_dir = WORKSPACE / "Temp"
         out_dir.mkdir(exist_ok=True)
-        output_file = str(out_dir / f"map_preview_{path.stem}.html")
+        output_file = str(out_dir / f"map_preview_{path.stem}{'_merge' if highlights else ''}.html")
     else:
         output_file = str(_resolve(output_file))
 
     Path(output_file).write_text(html, encoding="utf-8")
-    return f"Preview saved to: {output_file}\nOpen this file in a browser to see the map.\nRooms shown: {len(rooms)}"
+    return (f"Preview saved to: {output_file}\nOpen this file in a browser to see the map.\n"
+            f"Rooms shown: {len(rooms)}{overlay_note}")
 
 
 
@@ -5484,6 +5552,258 @@ _VANILLA_ENTITIES = frozenset({
     "coreMessage", "playbackTutorial", "playbackBillboard",
     "eventTrigger",
 })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  JSON ROUND-TRIP AND AUTHORING
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# map_to_json / json_to_map convert any .bin to typed JSON and back,
+# byte-identical when unedited. Authoring JSON is a looser format for content
+# written by hand or by a script (see js/ for the JavaScript layer); it is
+# merged into an existing map with merge_json_into_map, which only ever adds.
+
+_catalog_cache: dict = {}
+
+
+def _catalog(refresh: bool = False) -> "lua_defs.Catalog":
+    """Lönn definitions (workspace mod, installed mods, vanilla), rebuilt when a plugin file changes."""
+    sig_parts = []
+    for kind in lua_defs.KINDS:
+        base = WORKSPACE / "Loenn" / kind
+        if base.is_dir():
+            files = list(base.rglob("*.lua"))
+            sig_parts.append((kind, len(files), max((f.stat().st_mtime for f in files), default=0)))
+    sig = repr(sig_parts)
+    if refresh or _catalog_cache.get("sig") != sig:
+        _catalog_cache["cat"] = lua_defs.Catalog.load(WORKSPACE)
+        _catalog_cache["sig"] = sig
+    return _catalog_cache["cat"]
+
+
+def _default_out(source: Path, suffix: str) -> Path:
+    out_dir = WORKSPACE / "Export"
+    out_dir.mkdir(exist_ok=True)
+    return out_dir / f"{source.stem}{suffix}"
+
+
+@mcp.tool()
+def map_to_json(map_path: str, output_path: str = "", indent: int = 1) -> str:
+    """Convert a .bin map to typed JSON that converts back byte-identical.
+
+    Every attribute keeps its binary type: bool, u8, i16, i32, f32, lookup
+    (string-table string), string (plain string) or rle (tile data, decoded).
+    Room names are written exactly as stored (a 'lvl_' prefix stays). The dump
+    is checked to convert back to the same bytes before it is saved.
+
+    Args:
+        map_path: Path to the .bin file
+        output_path: Where to write the JSON (default: Export/<map>.json)
+        indent: JSON indent; 0 for the most compact file
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    try:
+        doc = map_json.map_to_json(path)
+    except (map_json.MapJsonError, ValueError) as exc:
+        return f"Not exported: {exc}"
+    out = _resolve(output_path) if output_path.strip() else _default_out(path, ".json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    text = map_json.dumps(doc, indent=indent or None)
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, out)
+    rooms = len(cb.get_rooms(map_json.json_to_tree(doc)))
+    return (f"Exported {path.name} → {out}\n{rooms} rooms, {len(doc['lookup'])} strings, "
+            f"{len(text) // 1024} KB. Verified: converts back byte-identical "
+            f"(sha256 {doc['source']['sha256'][:12]}…).")
+
+
+@mcp.tool()
+def json_to_map(json_path: str, map_path: str, overwrite: bool = False) -> str:
+    """Convert typed JSON (from map_to_json, possibly edited) back to a .bin map.
+
+    Refuses, writing nothing, when a value does not fit its declared type,
+    when an unedited dump would not reproduce its source byte-for-byte, or when
+    the output would not read back as the same map. Writes atomically (temp
+    file + replace) and keeps rolling .bak copies of a file it replaces.
+
+    Args:
+        json_path: Typed JSON file
+        map_path: Output .bin path
+        overwrite: Must be true to replace an existing map
+    """
+    src = _resolve(json_path)
+    out = _resolve(map_path)
+    if not src.exists():
+        return f"File not found: {json_path}"
+    if out.exists() and not overwrite:
+        return f"{map_path} exists. Pass overwrite=true to replace it (a .bak copy is kept)."
+    try:
+        doc = json.loads(src.read_text(encoding="utf-8"))
+        notes = map_json.write_json_as_map(doc, out)
+    except json.JSONDecodeError as exc:
+        return f"Not written: invalid JSON ({exc})"
+    except (map_json.MapJsonError, ValueError) as exc:
+        return f"Not written: {exc}"
+    return f"Wrote {out}\n" + "\n".join(f"  - {n}" for n in notes)
+
+
+@mcp.tool()
+def check_authoring_json(authoring_json: str) -> str:
+    """Resolve authoring JSON without a map: show each object with its defaults
+    filled in from the Lönn definitions, and flag unknown names.
+
+    Args:
+        authoring_json: Inline JSON, or a path to a .json file. Format:
+            {"rooms": [{"room": "a-05", "entities": [{"name": "strawberry", "x": 120, "y": 64}],
+                        "triggers": [...]}]}
+    """
+    try:
+        plan = authoring.resolve(authoring.load_doc(authoring_json, WORKSPACE), _catalog())
+    except (authoring.AuthoringError, ValueError, OSError) as exc:
+        return f"Invalid authoring JSON: {exc}"
+    lines = [f"{len(plan.items())} object(s) in {len(plan.rooms)} room(s)"]
+    for spec in plan.rooms:
+        lines.append(f"\n[{spec.name}]" + (" (new room)" if spec.create else ""))
+        for it in spec.items:
+            src = f" [{it.origin}]" if it.known else " [UNKNOWN]"
+            filled = f" defaults: {', '.join(it.defaults_used)}" if it.defaults_used else ""
+            kind = "trigger" if it.section == "triggers" else "entity"
+            lines.append(f"  {kind} {it.name}{src} at ({it.x:g},{it.y:g}){filled}")
+            lines += [f"      ! {w}" for w in it.warnings]
+    if plan.unknown:
+        lines.append(f"\n{len(plan.unknown)} unknown name(s): "
+                     + ", ".join(sorted({it.name for it in plan.unknown})))
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def merge_json_into_map(
+    map_path: str,
+    authoring_json: str,
+    dry_run: bool = True,
+    allow_unknown: bool = False,
+    allow_problems: bool = False,
+    preview: bool = True,
+) -> str:
+    """Add entities, triggers and rooms from authoring JSON to an existing map.
+
+    Nothing already in the map is changed: the output is re-read and compared
+    with the original, and the write is refused if anything but additions
+    differ. New IDs are unique across the whole map, above every ID in it.
+    Each added object is checked: inside room bounds, not inside solid tiles,
+    not sealed in an air pocket; and the room validators must not report new
+    issues.
+
+    Args:
+        map_path: Path to the .bin file
+        authoring_json: Inline JSON or a path to a .json file (see check_authoring_json)
+        dry_run: Only show the diff (default). Set false to write.
+        allow_unknown: Place objects with no Lönn definition anyway
+        allow_problems: Write even when placement checks fail
+        preview: Also render an HTML preview with the additions highlighted
+    """
+    path = _resolve(map_path)
+    if not path.exists():
+        return f"File not found: {map_path}"
+    original = path.read_bytes()
+    try:
+        doc = authoring.load_doc(authoring_json, WORKSPACE)
+        new_bytes, res = authoring.merge_bytes(original, doc, _catalog(), allow_unknown=allow_unknown)
+    except (authoring.AuthoringError, map_json.MapJsonError, ValueError, OSError) as exc:
+        return f"Not merged: {exc}"
+
+    report = [f"{'DRY RUN — nothing written' if dry_run else 'MERGE'}: {path.name}",
+              authoring.describe(res)]
+    if preview:
+        plan_path = _default_out(path, "_merge_plan.json")
+        plan_path.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+        report.append("\n" + render_map_html(str(path), overlay=str(plan_path)))
+    if dry_run:
+        report.append("\nRun again with dry_run=false to write.")
+        return "\n".join(report)
+    if res.problems and not allow_problems:
+        report.append(f"\nNot written: {len(res.problems)} placement problem(s). Fix them, or pass "
+                      "allow_problems=true.")
+        return "\n".join(report)
+    if path.read_bytes() != original:
+        return "Not written: the map changed on disk while merging. Run again."
+    cb.write_map_bytes(path, new_bytes)
+    report.append(f"\nWritten ({len(original)} → {len(new_bytes)} bytes). Previous version kept as "
+                  f"{path.name}.bak1.")
+    return "\n".join(report)
+
+
+def _run_author_script(script: Path, timeout: int = 60) -> tuple:
+    """Run a JS authoring script with Node; return (authoring JSON, console output)."""
+    import shutil
+    import subprocess
+    import tempfile
+    node = os.environ.get("LOENN_MCP_NODE") or shutil.which("node")
+    if not node:
+        raise RuntimeError("Node.js was not found (install it, or set LOENN_MCP_NODE)")
+    cli = Path(os.environ.get("LOENN_MCP_AUTHOR_CLI") or authoring.js_cli_path())
+    if not cli.exists():
+        raise RuntimeError(f"JS authoring CLI not found at {cli}")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "authoring.json"
+        proc = subprocess.run([node, str(cli), str(script), "--out", str(out)],
+                              capture_output=True, text=True, encoding="utf-8",
+                              timeout=timeout, cwd=str(script.parent))
+        log = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        if proc.returncode != 0:
+            raise RuntimeError(f"script failed (exit {proc.returncode}):\n{log[-3000:]}")
+        if not out.exists():
+            raise RuntimeError("script produced no authoring JSON (export a Plan, or call plan.emit())")
+        return json.loads(out.read_text(encoding="utf-8")), log
+
+
+@mcp.tool()
+def run_author_script(
+    script_path: str,
+    map_path: str = "",
+    output_json: str = "",
+    dry_run: bool = True,
+    allow_unknown: bool = False,
+    allow_problems: bool = False,
+) -> str:
+    """Run a JavaScript authoring script (js/ package, lucid-dream style) and
+    use its output.
+
+    The script builds rooms/entities/triggers in code and exports a Plan (see
+    README "Authoring maps from JavaScript"). Its authoring JSON is saved to
+    output_json, and merged into map_path if given (dry run by default, exactly
+    like merge_json_into_map). Needs Node.js.
+
+    Args:
+        script_path: The .js file
+        map_path: Map to merge into (optional)
+        output_json: Where to save the generated authoring JSON
+            (default: Export/<script>.authoring.json)
+        dry_run: Only show the diff when merging (default)
+        allow_unknown: See merge_json_into_map
+        allow_problems: See merge_json_into_map
+    """
+    script = _resolve(script_path)
+    if not script.exists():
+        return f"File not found: {script_path}"
+    try:
+        doc, log = _run_author_script(script)
+    except (RuntimeError, OSError, ValueError) as exc:
+        return f"Script not run: {exc}"
+    out = _resolve(output_json) if output_json.strip() else _default_out(script, ".authoring.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+    report = [f"Ran {script.name} → {out}"]
+    if log:
+        report.append("Console:\n" + "\n".join("  " + ln for ln in log.splitlines()[-40:]))
+    report.append(check_authoring_json(str(out)))
+    if map_path.strip():
+        report.append("\n" + merge_json_into_map(map_path, str(out), dry_run=dry_run,
+                                                 allow_unknown=allow_unknown, allow_problems=allow_problems))
+    return "\n".join(report)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,20 @@
+{
+ "# about": "Authoring JSON: add collectibles to rooms that already exist. Keys starting with # are comments.",
+ "rooms": [
+  {
+   "room": "a-01",
+   "entities": [
+    {"name": "strawberry", "x": 120, "y": 64},
+    {"name": "strawberry", "x": 200, "y": 48, "placement": "normal_winged"},
+    {"name": "strawberry", "x": 260, "y": 96, "nodes": [[250, 120], [270, 120]], "# seeds": "a seeded berry"},
+    {"name": "goldenBerry", "x": 40, "y": 140}
+   ]
+  },
+  {
+   "room": "a-02",
+   "triggers": [
+    {"name": "eventTrigger", "x": 0, "y": 0, "width": 16, "height": 184, "event": "end_city"}
+   ]
+  }
+ ]
+}

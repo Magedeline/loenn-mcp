@@ -1,0 +1,26 @@
+{
+  "name": "loenn-mcp-author",
+  "version": "0.1.0",
+  "description": "Write Celeste map content in JavaScript; outputs authoring JSON for loenn-mcp to merge into .bin maps.",
+  "main": "index.js",
+  "bin": {
+    "loenn-author": "bin/loenn-author.js"
+  },
+  "files": [
+    "index.js",
+    "bin/",
+    "examples/"
+  ],
+  "scripts": {
+    "test": "node test/test.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "keywords": ["celeste", "loenn", "map", "everest"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Maggy-Studio/loenn-mcp"
+  }
+}

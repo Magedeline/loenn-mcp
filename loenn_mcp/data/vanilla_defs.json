@@ -1,0 +1,3808 @@
+{
+ "generated_from": "Lönn 1.0.10",
+ "license": "MIT, Copyright (c) 2019-2025 Cruor and Vexatos (CelestialCartographers/Loenn)",
+ "definitions": [
+  {
+   "name": "SummitBackgroundManager",
+   "kind": "entities",
+   "source": "entities/summit_background_manager.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "manager",
+     "data": {
+      "index": 0,
+      "cutscene": "",
+      "intro_launch": false,
+      "dark": false,
+      "ambience": ""
+     }
+    }
+   ],
+   "fieldTypes": {
+    "index": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "badelineBoost",
+   "kind": "entities",
+   "source": "entities/badeline_boost.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "boost",
+     "data": {
+      "lockCamera": true,
+      "canSkip": false,
+      "finalCh9Boost": false,
+      "finalCh9GoldenBoost": false,
+      "finalCh9Dialog": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "bigSpinner",
+   "kind": "entities",
+   "source": "entities/bumper.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bumper",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "bigWaterfall",
+   "kind": "entities",
+   "source": "entities/big_waterfall.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "foreground",
+     "data": {
+      "width": 16,
+      "height": 16,
+      "layer": "FG"
+     }
+    },
+    {
+     "name": "background",
+     "data": {
+      "width": 16,
+      "height": 16,
+      "layer": "BG"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "bird",
+   "kind": "entities",
+   "source": "entities/bird_npc.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bird",
+     "data": {
+      "mode": "Sleeping",
+      "onlyOnce": false,
+      "onlyIfPlayerLeft": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "birdForsakenCityGem",
+   "kind": "entities",
+   "source": "entities/forsaken_city_satellite.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "satellite",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    2,
+    2
+   ],
+   "parsed": true
+  },
+  {
+   "name": "birdPath",
+   "kind": "entities",
+   "source": "entities/bird_path.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bird_path",
+     "data": {
+      "only_once": false,
+      "onlyIfLeft": false,
+      "speedMult": 1.0,
+      "angleFix": false,
+      "angleFixMaxRotation": 60.0
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "blackGem",
+   "kind": "entities",
+   "source": "entities/crystal_heart.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "crystal_heart",
+     "data": {
+      "fake": false,
+      "removeCameraTriggers": false,
+      "fakeHeartDialog": "CH9_FAKE_HEART",
+      "keepGoingDialog": "CH9_KEEP_GOING"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "blockField",
+   "kind": "entities",
+   "source": "entities/strawberry_blockfield.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "block_field",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "bonfire",
+   "kind": "entities",
+   "source": "entities/bonfire.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bonfire",
+     "data": {
+      "mode": "Lit"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "booster",
+   "kind": "entities",
+   "source": "entities/booster.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "green",
+     "data": {
+      "red": false,
+      "ch9_hub_booster": false
+     }
+    },
+    {
+     "name": "red",
+     "data": {
+      "red": true,
+      "ch9_hub_booster": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "bounceBlock",
+   "kind": "entities",
+   "source": "entities/bounce_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fire",
+     "data": {
+      "width": 16,
+      "height": 16,
+      "notCoreMode": false
+     }
+    },
+    {
+     "name": "ice",
+     "data": {
+      "width": 16,
+      "height": 16,
+      "notCoreMode": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "bridge",
+   "kind": "entities",
+   "source": "entities/bridge.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bridge",
+     "data": {
+      "width": 32
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    2,
+    2
+   ],
+   "parsed": true
+  },
+  {
+   "name": "bridgeFixed",
+   "kind": "entities",
+   "source": "entities/fixed_bridge.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bridge_fixed",
+     "data": {
+      "width": 32
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "cassette",
+   "kind": "entities",
+   "source": "entities/cassette.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cassette",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    2,
+    2
+   ],
+   "parsed": true
+  },
+  {
+   "name": "cassetteBlock",
+   "kind": "entities",
+   "source": "entities/cassette_block.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {
+    "index": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "checkpoint",
+   "kind": "entities",
+   "source": "entities/checkpoint.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {
+    "dreaming": "anything",
+    "inventory": "anything",
+    "coreMode": "anything",
+    "checkpointID": "integer"
+   },
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": false
+  },
+  {
+   "name": "cliffflag",
+   "kind": "entities",
+   "source": "entities/cliffside_flagline.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cliffflag",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "cliffside_flag",
+   "kind": "entities",
+   "source": "entities/cliffside_flag.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cliffside_flag",
+     "data": {
+      "index": 0
+     }
+    }
+   ],
+   "fieldTypes": {
+    "index": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "clothesline",
+   "kind": "entities",
+   "source": "entities/clothesline.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "clothesline",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "cloud",
+   "kind": "entities",
+   "source": "entities/cloud.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {
+      "fragile": false,
+      "small": false
+     }
+    },
+    {
+     "name": "fragile",
+     "data": {
+      "fragile": true,
+      "small": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "clutterCabinet",
+   "kind": "entities",
+   "source": "entities/clutter_cabinet.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cabinet",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "clutterDoor",
+   "kind": "entities",
+   "source": "entities/clutter_door.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "cobweb",
+   "kind": "entities",
+   "source": "entities/cobweb.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cobweb",
+     "data": {
+      "color": "696A6A"
+     }
+    }
+   ],
+   "fieldTypes": {
+    "color": "color"
+   },
+   "nodeLimits": [
+    1,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "colorSwitch",
+   "kind": "entities",
+   "source": "entities/clutter_switch.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "conditionBlock",
+   "kind": "entities",
+   "source": "entities/condition_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "condition_block",
+     "data": {
+      "condition": "Key",
+      "conditionID": "1:1",
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tileType"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "coreMessage",
+   "kind": "entities",
+   "source": "entities/core_message.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "coreModeToggle",
+   "kind": "entities",
+   "source": "entities/core_toggle.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "both",
+     "data": {
+      "onlyIce": false,
+      "onlyFire": false,
+      "persistent": false
+     }
+    },
+    {
+     "name": "fire",
+     "data": {
+      "onlyIce": false,
+      "onlyFire": true,
+      "persistent": false
+     }
+    },
+    {
+     "name": "ice",
+     "data": {
+      "onlyIce": true,
+      "onlyFire": false,
+      "persistent": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "coverupWall",
+   "kind": "entities",
+   "source": "entities/coverup_wall.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "coverup_wall",
+     "data": {
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "crumbleBlock",
+   "kind": "entities",
+   "source": "entities/crumble_blocks.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "crumbleWallOnRumble",
+   "kind": "entities",
+   "source": "entities/crumble_wall_on_rumble.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "crumble_wall",
+     "data": {
+      "blendin": true,
+      "persistent": false,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "crushBlock",
+   "kind": "entities",
+   "source": "entities/kevin.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "cutsceneNode",
+   "kind": "entities",
+   "source": "entities/cutscene_node.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cutscene_node",
+     "data": {
+      "nodeName": ""
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "darkChaser",
+   "kind": "entities",
+   "source": "entities/badeline_chaser.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "dark_chaser",
+     "data": {
+      "canChangeMusic": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "darkChaserEnd",
+   "kind": "entities",
+   "source": "entities/badeline_chaser_barrier.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "barrier",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "dashBlock",
+   "kind": "entities",
+   "source": "entities/dash_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "dash_block",
+     "data": {
+      "blendin": true,
+      "canDash": true,
+      "permanent": true,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "dashSwitchH",
+   "kind": "entities",
+   "source": "entities/dash_switch.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "dashSwitchV",
+   "kind": "entities",
+   "source": "entities/dash_switch.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "door",
+   "kind": "entities",
+   "source": "entities/door.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "dreamBlock",
+   "kind": "entities",
+   "source": "entities/dream_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "dream_block",
+     "data": {
+      "fastMoving": false,
+      "below": false,
+      "oneUse": false,
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "dreamHeartGem",
+   "kind": "entities",
+   "source": "entities/dream_heart.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "crystal_heart",
+     "data": {
+      "color": "Random"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "dreammirror",
+   "kind": "entities",
+   "source": "entities/dream_mirror.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/coreMessage",
+   "kind": "entities",
+   "source": "entities/core_message.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "core_message",
+     "data": {
+      "line": 0,
+      "dialog": "app_ending",
+      "outline": false
+     }
+    }
+   ],
+   "fieldTypes": {
+    "line": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/customBirdTutorial",
+   "kind": "entities",
+   "source": "entities/everest_bird_tutorial.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bird",
+     "data": {
+      "faceLeft": true,
+      "birdId": "",
+      "onlyOnce": false,
+      "caw": true,
+      "info": "TUTORIAL_DREAMJUMP",
+      "controls": "DownRight,+,Dash,tinyarrow,Jump"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "everest/memorial",
+   "kind": "entities",
+   "source": "entities/memorial.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "memorial",
+     "data": {
+      "dialog": "MEMORIAL",
+      "sprite": "scenery/memorial/memorial",
+      "spacing": 16
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/npc",
+   "kind": "entities",
+   "source": "entities/npc.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "npc",
+     "data": {
+      "sprite": "player/idle",
+      "spriteRate": 1,
+      "dialogId": "",
+      "onlyOnce": true,
+      "endLevel": false,
+      "flipX": false,
+      "flipY": false,
+      "approachWhenTalking": false,
+      "approachDistance": 16,
+      "indicatorOffsetX": 0,
+      "indicatorOffsetY": 0
+     }
+    }
+   ],
+   "fieldTypes": {
+    "spriteRate": "integer",
+    "approachDistance": "integer",
+    "indicatorOffsetX": "integer",
+    "indicatorOffsetY": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/starClimbGraphicsController",
+   "kind": "entities",
+   "source": "entities/star_climb_controller.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "controller",
+     "data": {
+      "fgColor": "A3FFFF",
+      "bgColor": "293E4B"
+     }
+    }
+   ],
+   "fieldTypes": {
+    "fgColor": "color",
+    "bgColor": "color"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "exitBlock",
+   "kind": "entities",
+   "source": "entities/exit_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "exit_block",
+     "data": {
+      "playTransitionReveal": false,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tileType"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "eyebomb",
+   "kind": "entities",
+   "source": "entities/puffer.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "left",
+     "data": {
+      "right": false
+     }
+    },
+    {
+     "name": "right",
+     "data": {
+      "right": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "fakeBlock",
+   "kind": "entities",
+   "source": "entities/fake_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fake_block",
+     "data": {
+      "playTransitionReveal": false,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "fakeHeart",
+   "kind": "entities",
+   "source": "entities/fake_heart.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "crystal_heart",
+     "data": {
+      "color": "Random"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "fakeWall",
+   "kind": "entities",
+   "source": "entities/fake_wall.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fake_wall",
+     "data": {
+      "playTransitionReveal": false,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "fallingBlock",
+   "kind": "entities",
+   "source": "entities/falling_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "falling_block",
+     "data": {
+      "climbFall": true,
+      "behind": false,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "finalBoss",
+   "kind": "entities",
+   "source": "entities/badeline_boss.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "boss",
+     "data": {
+      "patternIndex": 1,
+      "startHit": false,
+      "cameraPastY": 120.0,
+      "cameraLockY": true,
+      "canChangeMusic": true
+     }
+    }
+   ],
+   "fieldTypes": {
+    "patternIndex": "integer"
+   },
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "finalBossFallingBlock",
+   "kind": "entities",
+   "source": "entities/badeline_boss_falling_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "falling_block",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "finalBossMovingBlock",
+   "kind": "entities",
+   "source": "entities/badeline_boss_moving_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "moving_block",
+     "data": {
+      "nodeIndex": 0,
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {
+    "nodeIndex": "integer"
+   },
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "fireBall",
+   "kind": "entities",
+   "source": "entities/fireball.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fireball",
+     "data": {
+      "amount": 3,
+      "offset": 0.0,
+      "speed": 1.0,
+      "notCoreMode": false
+     }
+    },
+    {
+     "name": "iceball",
+     "data": {
+      "amount": 3,
+      "offset": 0.0,
+      "speed": 1.0,
+      "notCoreMode": true
+     }
+    }
+   ],
+   "fieldTypes": {
+    "amount": "integer"
+   },
+   "nodeLimits": [
+    1,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "fireBarrier",
+   "kind": "entities",
+   "source": "entities/fire_barrier.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fire_barrier",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "flingBird",
+   "kind": "entities",
+   "source": "entities/fling_bird.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fling_bird",
+     "data": {
+      "waiting": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "flingBirdIntro",
+   "kind": "entities",
+   "source": "entities/fling_bird_intro.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "fling_bird",
+     "data": {
+      "crashes": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "floatingDebris",
+   "kind": "entities",
+   "source": "entities/floating_debris.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "floating_debris",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "floatySpaceBlock",
+   "kind": "entities",
+   "source": "entities/floaty_space_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "floaty_space_block",
+     "data": {
+      "disableSpawnOffset": false,
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "flutterbird",
+   "kind": "entities",
+   "source": "entities/flutterbird.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "foregroundDebris",
+   "kind": "entities",
+   "source": "entities/foreground_debris.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "foreground_debris",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "friendlyGhost",
+   "kind": "entities",
+   "source": "entities/oshiro_boss.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "oshiro_boss",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "glassBlock",
+   "kind": "entities",
+   "source": "entities/glass_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "glass_block",
+     "data": {
+      "sinks": false,
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "glider",
+   "kind": "entities",
+   "source": "entities/glider.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {
+      "tutorial": false,
+      "bubble": false
+     }
+    },
+    {
+     "name": "floating",
+     "data": {
+      "tutorial": false,
+      "bubble": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "goldenBerry",
+   "kind": "entities",
+   "source": "entities/golden_strawberry.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "golden",
+     "data": {
+      "winged": false,
+      "moon": false
+     }
+    },
+    {
+     "name": "golden_winged",
+     "data": {
+      "winged": true,
+      "moon": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "goldenBlock",
+   "kind": "entities",
+   "source": "entities/golden_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "golden_block",
+     "data": {
+      "width": 16,
+      "height": 16
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "gondola",
+   "kind": "entities",
+   "source": "entities/gondola.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "gondola",
+     "data": {
+      "active": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "hahaha",
+   "kind": "entities",
+   "source": "entities/hahaha.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "hahaha",
+     "data": {
+      "ifset": "",
+      "triggerLaughSfx": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "hanginglamp",
+   "kind": "entities",
+   "source": "entities/hanging_lamp.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "hanging_lamp",
+     "data": {
+      "height": 16
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "heartGemDoor",
+   "kind": "entities",
+   "source": "entities/heart_door.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "door",
+     "data": {
+      "width": 40,
+      "requires": 0,
+      "startHidden": false
+     }
+    }
+   ],
+   "fieldTypes": {
+    "requires": "integer"
+   },
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "iceBlock",
+   "kind": "entities",
+   "source": "entities/ice_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "ice_block",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "infiniteStar",
+   "kind": "entities",
+   "source": "entities/feather.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {
+      "shielded": false,
+      "singleUse": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "introCar",
+   "kind": "entities",
+   "source": "entities/intro_car.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "intro_car",
+     "data": {
+      "hasRoadAndBarriers": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "introCrusher",
+   "kind": "entities",
+   "source": "entities/intro_crusher.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "intro_crusher",
+     "data": {
+      "flags": "1,0b",
+      "width": 8,
+      "height": 8
+     },
+     "computed": [
+      "tiletype"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "invisibleBarrier",
+   "kind": "entities",
+   "source": "entities/invisible_barrier.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "invisible_barrier",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "jumpThru",
+   "kind": "entities",
+   "source": "entities/jump_thru.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {
+    "surfaceIndex": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "kevins_pc",
+   "kind": "entities",
+   "source": "entities/kevins_pc.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "kevins_pc",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "key",
+   "kind": "entities",
+   "source": "entities/key.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {}
+    },
+    {
+     "name": "with_return",
+     "data": {},
+     "computed": [
+      "nodes"
+     ]
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "killbox",
+   "kind": "entities",
+   "source": "entities/killbox.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "killbox",
+     "data": {
+      "width": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "lamp",
+   "kind": "entities",
+   "source": "entities/lamp.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {
+      "broken": false
+     }
+    },
+    {
+     "name": "broken",
+     "data": {
+      "broken": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "lightbeam",
+   "kind": "entities",
+   "source": "entities/lightbeam.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "lightbeam",
+     "data": {
+      "width": 32,
+      "height": 24,
+      "flag": "",
+      "rotation": 0.0
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "lightning",
+   "kind": "entities",
+   "source": "entities/lightning.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "lightning",
+     "data": {
+      "width": 8,
+      "height": 8,
+      "perLevel": false,
+      "moveTime": 5.0
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "lightningBlock",
+   "kind": "entities",
+   "source": "entities/lightning_breaker_box.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "breaker_box",
+     "data": {
+      "flipX": false,
+      "music_progress": -1,
+      "music_session": false,
+      "music": "",
+      "flag": false
+     }
+    }
+   ],
+   "fieldTypes": {
+    "music_progress": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "lockBlock",
+   "kind": "entities",
+   "source": "entities/lock_block.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "memorial",
+   "kind": "entities",
+   "source": "entities/memorial.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "memorialTextController",
+   "kind": "entities",
+   "source": "entities/memorial_text_controller.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "golden_no_dash",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "moonCreature",
+   "kind": "entities",
+   "source": "entities/moon_creature.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "moon_creature",
+     "data": {
+      "number": 1
+     }
+    }
+   ],
+   "fieldTypes": {
+    "number": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "moveBlock",
+   "kind": "entities",
+   "source": "entities/move_block.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "movingPlatform",
+   "kind": "entities",
+   "source": "entities/platform.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "negaBlock",
+   "kind": "entities",
+   "source": "entities/nega_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "nega_block",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "npc",
+   "kind": "entities",
+   "source": "entities/npc.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "oshirodoor",
+   "kind": "entities",
+   "source": "entities/oshiro_door.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "oshiro_door",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "payphone",
+   "kind": "entities",
+   "source": "entities/payphone.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "payphone",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "picoconsole",
+   "kind": "entities",
+   "source": "entities/pico_console.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "pico_console",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "plateau",
+   "kind": "entities",
+   "source": "entities/plateau.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "plateau",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "playbackBillboard",
+   "kind": "entities",
+   "source": "entities/playback_billboard.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "playback_billboard",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "playbackTutorial",
+   "kind": "entities",
+   "source": "entities/player_playback.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "playback",
+     "data": {
+      "tutorial": ""
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    2
+   ],
+   "parsed": true
+  },
+  {
+   "name": "player",
+   "kind": "entities",
+   "source": "entities/player.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "player",
+     "data": {
+      "isDefaultSpawn": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "playerSeeker",
+   "kind": "entities",
+   "source": "entities/player_seeker.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "player_seeker",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "powerSourceNumber",
+   "kind": "entities",
+   "source": "entities/power_source_number.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "power_source_number",
+     "data": {
+      "number": 1,
+      "strawberries": "",
+      "keys": ""
+     }
+    }
+   ],
+   "fieldTypes": {
+    "number": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "refill",
+   "kind": "entities",
+   "source": "entities/refill.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "one_dash",
+     "data": {
+      "oneUse": false,
+      "twoDash": false
+     }
+    },
+    {
+     "name": "two_dashes",
+     "data": {
+      "oneUse": false,
+      "twoDash": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "reflectionHeartStatue",
+   "kind": "entities",
+   "source": "entities/reflection_heart_statue.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "statue",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    5,
+    5
+   ],
+   "parsed": true
+  },
+  {
+   "name": "resortLantern",
+   "kind": "entities",
+   "source": "entities/resort_lantern.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "lantern",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "resortRoofEnding",
+   "kind": "entities",
+   "source": "entities/resort_roof_ending.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "resort_roof_ending",
+     "data": {
+      "width": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "resortmirror",
+   "kind": "entities",
+   "source": "entities/resort_mirror.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "mirror",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "ridgeGate",
+   "kind": "entities",
+   "source": "entities/ridge_gate.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "ridge_gate",
+     "data": {
+      "texture": "objects/ridgeGate",
+      "strawberries": "",
+      "keys": "",
+      "width": 32,
+      "height": 32
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "risingLava",
+   "kind": "entities",
+   "source": "entities/rising_lava.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "rising_lava",
+     "data": {
+      "intro": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "rotateSpinner",
+   "kind": "entities",
+   "source": "entities/rotate_spinner.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "sandwichLava",
+   "kind": "entities",
+   "source": "entities/lava_sandwich.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "lava_sandwich",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "seeker",
+   "kind": "entities",
+   "source": "entities/seeker.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "seeker",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "seekerBarrier",
+   "kind": "entities",
+   "source": "entities/seeker_barrier.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "seeker_barrier",
+     "data": {
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "seekerStatue",
+   "kind": "entities",
+   "source": "entities/seeker_statue.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "seeker_statue",
+     "data": {
+      "hatch": "Distance"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "sinkingPlatform",
+   "kind": "entities",
+   "source": "entities/platform.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "slider",
+   "kind": "entities",
+   "source": "entities/slider.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "clockwise",
+     "data": {
+      "clockwise": true,
+      "surface": "Floor"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "soundSource",
+   "kind": "entities",
+   "source": "entities/sound_source.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "sound_source",
+     "data": {
+      "sound": ""
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "spikesDown",
+   "kind": "entities",
+   "source": "entities/spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "down",
+     "data": {
+      "width": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "spikesLeft",
+   "kind": "entities",
+   "source": "entities/spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "left",
+     "data": {
+      "height": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "spikesRight",
+   "kind": "entities",
+   "source": "entities/spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "right",
+     "data": {
+      "height": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "spikesUp",
+   "kind": "entities",
+   "source": "entities/spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "up",
+     "data": {
+      "width": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "spinner",
+   "kind": "entities",
+   "source": "entities/spinner.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "dust_sprite",
+     "data": {
+      "color": "blue",
+      "dust": true,
+      "attachToSolid": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "spring",
+   "kind": "entities",
+   "source": "entities/spring.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "up",
+     "data": {
+      "playerCanUse": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "starClimbController",
+   "kind": "entities",
+   "source": "entities/star_climb_controller.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "controller",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "starJumpBlock",
+   "kind": "entities",
+   "source": "entities/star_jump_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "star_jump_block",
+     "data": {
+      "width": 8,
+      "height": 8,
+      "sinks": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "strawberry",
+   "kind": "entities",
+   "source": "entities/strawberry.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "normal",
+     "data": {
+      "winged": false,
+      "moon": false,
+      "checkpointID": -1,
+      "order": -1
+     }
+    },
+    {
+     "name": "normal_winged",
+     "data": {
+      "winged": true,
+      "moon": false,
+      "checkpointID": -1,
+      "order": -1
+     }
+    },
+    {
+     "name": "moon",
+     "data": {
+      "winged": false,
+      "moon": true,
+      "checkpointID": -1,
+      "order": -1
+     }
+    }
+   ],
+   "fieldTypes": {
+    "order": "integer",
+    "checkpointID": "integer"
+   },
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "summitGemManager",
+   "kind": "entities",
+   "source": "entities/summit_gem_manager.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "summitcheckpoint",
+   "kind": "entities",
+   "source": "entities/summit_checkpoint.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "summit_checkpoint",
+     "data": {
+      "number": 0
+     }
+    }
+   ],
+   "fieldTypes": {
+    "number": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "summitcloud",
+   "kind": "entities",
+   "source": "entities/summit_cloud.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "summit_cloud",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "summitgem",
+   "kind": "entities",
+   "source": "entities/summit_gems.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {
+    "gem": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "swapBlock",
+   "kind": "entities",
+   "source": "entities/swap_block.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "switchGate",
+   "kind": "entities",
+   "source": "entities/switch_gate.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "templeBigEyeball",
+   "kind": "entities",
+   "source": "entities/temple_big_eyeball.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "temple_big_eyeball",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "templeCrackedBlock",
+   "kind": "entities",
+   "source": "entities/temple_cracked_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "temple_block",
+     "data": {
+      "width": 16,
+      "height": 16,
+      "persistent": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "templeEye",
+   "kind": "entities",
+   "source": "entities/temple_eye.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "temple_eye",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "templeGate",
+   "kind": "entities",
+   "source": "entities/temple_gate.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "templeMirror",
+   "kind": "entities",
+   "source": "entities/temple_mirror.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "mirror",
+     "data": {
+      "width": 24,
+      "height": 24,
+      "reflectX": 0.0,
+      "reflectY": 0.0
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "templeMirrorPortal",
+   "kind": "entities",
+   "source": "entities/temple_mirror_portal.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "temple_mirror_portal",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "tentacles",
+   "kind": "entities",
+   "source": "entities/tentacles.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "tentacles",
+     "data": {
+      "fear_distance": "",
+      "slide_until": 0
+     }
+    }
+   ],
+   "fieldTypes": {
+    "slide_until": "integer"
+   },
+   "nodeLimits": [
+    1,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "theoCrystal",
+   "kind": "entities",
+   "source": "entities/theo_crystal.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "theo_crystal",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "theoCrystalPedestal",
+   "kind": "entities",
+   "source": "entities/theo_crystal_pedestal.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "pedestal",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "torch",
+   "kind": "entities",
+   "source": "entities/torch.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "torch",
+     "data": {
+      "startLit": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "touchSwitch",
+   "kind": "entities",
+   "source": "entities/touch_switch.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "touch_switch",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "towerviewer",
+   "kind": "entities",
+   "source": "entities/watchtower.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "watchtower",
+     "data": {
+      "summit": false,
+      "onlyY": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    -1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "trackSpinner",
+   "kind": "entities",
+   "source": "entities/track_spinner.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "trapdoor",
+   "kind": "entities",
+   "source": "entities/trapdoor.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "trapdoor",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesDown",
+   "kind": "entities",
+   "source": "entities/trigger_spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "down",
+     "data": {
+      "width": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesLeft",
+   "kind": "entities",
+   "source": "entities/trigger_spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "left",
+     "data": {
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesOriginalDown",
+   "kind": "entities",
+   "source": "entities/trigger_spikes_original.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "down",
+     "data": {
+      "width": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesOriginalLeft",
+   "kind": "entities",
+   "source": "entities/trigger_spikes_original.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "left",
+     "data": {
+      "height": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesOriginalRight",
+   "kind": "entities",
+   "source": "entities/trigger_spikes_original.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "right",
+     "data": {
+      "height": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesOriginalUp",
+   "kind": "entities",
+   "source": "entities/trigger_spikes_original.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "up",
+     "data": {
+      "width": 8,
+      "type": "default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesRight",
+   "kind": "entities",
+   "source": "entities/trigger_spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "right",
+     "data": {
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "triggerSpikesUp",
+   "kind": "entities",
+   "source": "entities/trigger_spikes.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "up",
+     "data": {
+      "width": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "wallBooster",
+   "kind": "entities",
+   "source": "entities/wallbooster.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "booster_right",
+     "data": {
+      "height": 8,
+      "left": true,
+      "notCoreMode": false
+     }
+    },
+    {
+     "name": "booster_left",
+     "data": {
+      "height": 8,
+      "left": false,
+      "notCoreMode": false
+     }
+    },
+    {
+     "name": "ice_right",
+     "data": {
+      "height": 8,
+      "left": true,
+      "notCoreMode": true
+     }
+    },
+    {
+     "name": "ice_left",
+     "data": {
+      "height": 8,
+      "left": false,
+      "notCoreMode": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "wallSpringLeft",
+   "kind": "entities",
+   "source": "entities/spring.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "wallSpringRight",
+   "kind": "entities",
+   "source": "entities/spring.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": false
+  },
+  {
+   "name": "water",
+   "kind": "entities",
+   "source": "entities/water.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "water",
+     "data": {
+      "hasBottom": false,
+      "width": 8,
+      "height": 8
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "waterfall",
+   "kind": "entities",
+   "source": "entities/waterfall.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "waterfall",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "wavedashmachine",
+   "kind": "entities",
+   "source": "entities/internet_cafe.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "cafe",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "whiteblock",
+   "kind": "entities",
+   "source": "entities/white_block.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "white_block",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "wire",
+   "kind": "entities",
+   "source": "entities/wire.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "wire",
+     "data": {
+      "above": false,
+      "color": "595866",
+      "fixWindBehavior": true
+     }
+    }
+   ],
+   "fieldTypes": {
+    "color": "color"
+   },
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "zipMover",
+   "kind": "entities",
+   "source": "entities/zip_mover.lua",
+   "origin": "vanilla",
+   "placements": [],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "altMusicTrigger",
+   "kind": "triggers",
+   "source": "triggers/alt_music.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "alt_music",
+     "data": {
+      "track": "",
+      "resetOnLeave": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "ambienceParamTrigger",
+   "kind": "triggers",
+   "source": "triggers/ambience_param.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "ambience_param",
+     "data": {
+      "parameter": "",
+      "from": 0.0,
+      "to": 0.0,
+      "direction": "NoEffect"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "birdPathTrigger",
+   "kind": "triggers",
+   "source": "triggers/bird_path.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bird_path",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "blackholeStrength",
+   "kind": "triggers",
+   "source": "triggers/black_hole_strength.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "black_hole_strength",
+     "data": {
+      "strength": "Mild"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "bloomFadeTrigger",
+   "kind": "triggers",
+   "source": "triggers/bloom_fade.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "bloom_fade",
+     "data": {
+      "bloomAddFrom": 0.0,
+      "bloomAddTo": 0,
+      "positionMode": "NoEffect"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "cameraAdvanceTargetTrigger",
+   "kind": "triggers",
+   "source": "triggers/camera_advance_target.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "camera_advance_target",
+     "data": {
+      "lerpStrengthX": 1.0,
+      "lerpStrengthY": 1.0,
+      "positionModeX": "NoEffect",
+      "positionModeY": "NoEffect",
+      "xOnly": false,
+      "yOnly": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "cameraOffsetTrigger",
+   "kind": "triggers",
+   "source": "triggers/camera_offset.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "camera_offset",
+     "data": {
+      "cameraX": 0.0,
+      "cameraY": 0.0
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "cameraTargetTrigger",
+   "kind": "triggers",
+   "source": "triggers/camera_target.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "camera_target",
+     "data": {
+      "lerpStrength": 1.0,
+      "positionMode": "NoEffect",
+      "xOnly": false,
+      "yOnly": false,
+      "deleteFlag": ""
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "changeRespawnTrigger",
+   "kind": "triggers",
+   "source": "triggers/change_respawn.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "change_respawn",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    0,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "checkpointBlockerTrigger",
+   "kind": "triggers",
+   "source": "triggers/checkpoint_blocker.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "checkpoint_blocker",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "creditsTrigger",
+   "kind": "triggers",
+   "source": "triggers/credits.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "credits",
+     "data": {
+      "event": ""
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "detachFollowersTrigger",
+   "kind": "triggers",
+   "source": "triggers/detach_followers.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "detach_followers",
+     "data": {
+      "global": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "eventTrigger",
+   "kind": "triggers",
+   "source": "triggers/event.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "event",
+     "data": {
+      "event": "",
+      "onSpawn": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/CustomHeightDisplayTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_custom_height_display.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "custom_height_display",
+     "data": {
+      "vanilla": false,
+      "target": 0,
+      "from": 0,
+      "text": "{x}m",
+      "progressAudio": false,
+      "displayOnTransition": false
+     }
+    }
+   ],
+   "fieldTypes": {
+    "target": "integer",
+    "from": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/activateDreamBlocksTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_activate_dream_blocks.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "activate_dream_blocks",
+     "data": {
+      "fullRoutine": false,
+      "activate": true,
+      "fastAnimation": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/ambienceTrigger",
+   "kind": "triggers",
+   "source": "triggers/ambience.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "ambience",
+     "data": {
+      "track": "",
+      "resetOnLeave": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/ambienceVolumeTrigger",
+   "kind": "triggers",
+   "source": "triggers/ambience_volume.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "ambience_volume",
+     "data": {
+      "from": 0.0,
+      "to": 0.0,
+      "direction": "NoEffect"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/changeInventoryTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_change_inventory.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "change_inventory",
+     "data": {
+      "inventory": "Default"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/completeAreaTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_complete_area.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "complete_area",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/coreModeTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_core_mode.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "core_mode",
+     "data": {
+      "mode": "None",
+      "playEffects": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/crystalShatterTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_crystal_shatter.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "crystal_shatter",
+     "data": {
+      "mode": "All"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/customBirdTutorialTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_custom_bird_tutorial.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "custom_bird_tutorial",
+     "data": {
+      "birdId": "",
+      "showTutorial": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/dialogTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_dialog.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "dialog",
+     "data": {
+      "endLevel": false,
+      "onlyOnce": true,
+      "dialogId": "",
+      "deathCount": -1
+     }
+    }
+   ],
+   "fieldTypes": {
+    "deathCount": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/flagTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_flag.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "flag",
+     "data": {
+      "flag": "",
+      "state": true,
+      "mode": "OnPlayerEnter",
+      "only_once": false,
+      "death_count": -1
+     }
+    }
+   ],
+   "fieldTypes": {
+    "death_count": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/lavaBlockerTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_lava_blocker.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "lava_blocker",
+     "data": {
+      "canReenter": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/musicLayerTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_music_layer.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "music_layer",
+     "data": {
+      "layers": "",
+      "enable": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "everest/smoothCameraOffsetTrigger",
+   "kind": "triggers",
+   "source": "triggers/everest_smooth_camera.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "smooth_camera",
+     "data": {
+      "offsetXFrom": 0.0,
+      "offsetXTo": 0.0,
+      "offsetYFrom": 0.0,
+      "offsetYTo": 0.0,
+      "positionMode": "NoEffect",
+      "onlyOnce": false,
+      "xOnly": false,
+      "yOnly": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "goldenBerryCollectTrigger",
+   "kind": "triggers",
+   "source": "triggers/golden_berry_collection.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "golden_berry_collection",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "lightFadeTrigger",
+   "kind": "triggers",
+   "source": "triggers/light_fade.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "light_fade",
+     "data": {
+      "lightAddFrom": 0.0,
+      "lightAddTo": 0.0,
+      "positionMode": "NoEffect"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "lookoutBlocker",
+   "kind": "triggers",
+   "source": "triggers/lookout_blocker.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "lookout_blocker",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "minitextboxTrigger",
+   "kind": "triggers",
+   "source": "triggers/mini_text_box.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "mini_text_box",
+     "data": {
+      "dialog_id": "",
+      "mode": "OnPlayerEnter",
+      "only_once": true,
+      "death_count": -1
+     }
+    }
+   ],
+   "fieldTypes": {
+    "death_count": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "moonGlitchBackgroundTrigger",
+   "kind": "triggers",
+   "source": "triggers/moon_glitch_background.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "moon_glitch_background",
+     "data": {
+      "duration": "Short",
+      "stay": false,
+      "glitch": true
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "musicFadeTrigger",
+   "kind": "triggers",
+   "source": "triggers/music_fade.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "music_fade",
+     "data": {
+      "positionMode": "NoEffect",
+      "fadeA": 0.0,
+      "fadeB": 1.0,
+      "parameter": ""
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "musicTrigger",
+   "kind": "triggers",
+   "source": "triggers/music.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "music",
+     "data": {
+      "track": "",
+      "resetOnLeave": true,
+      "progress": 0
+     }
+    }
+   ],
+   "fieldTypes": {
+    "death_count": "integer"
+   },
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "noRefillTrigger",
+   "kind": "triggers",
+   "source": "triggers/no_refill.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "disable_refills",
+     "data": {
+      "state": true
+     }
+    },
+    {
+     "name": "enable_refills",
+     "data": {
+      "state": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "oshiroTrigger",
+   "kind": "triggers",
+   "source": "triggers/oshiro.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "oshiro_spawn",
+     "data": {
+      "state": true
+     }
+    },
+    {
+     "name": "oshiro_leave",
+     "data": {
+      "state": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "respawnTargetTrigger",
+   "kind": "triggers",
+   "source": "triggers/respawn_target.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "respawn_target",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    1,
+    1
+   ],
+   "parsed": true
+  },
+  {
+   "name": "rumbleTrigger",
+   "kind": "triggers",
+   "source": "triggers/rumble.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "rumble",
+     "data": {
+      "manualTrigger": false,
+      "persistent": false,
+      "constrainHeight": false
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": [
+    2,
+    2
+   ],
+   "parsed": true
+  },
+  {
+   "name": "spawnFacingTrigger",
+   "kind": "triggers",
+   "source": "triggers/spawn_facing.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "spawn_facing",
+     "data": {
+      "facing": "Right"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "stopBoostTrigger",
+   "kind": "triggers",
+   "source": "triggers/stop_boost.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "stop_boost",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "windAttackTrigger",
+   "kind": "triggers",
+   "source": "triggers/wind_attack.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "wind_attack",
+     "data": {}
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  },
+  {
+   "name": "windTrigger",
+   "kind": "triggers",
+   "source": "triggers/wind.lua",
+   "origin": "vanilla",
+   "placements": [
+    {
+     "name": "wind",
+     "data": {
+      "pattern": "None"
+     }
+    }
+   ],
+   "fieldTypes": {},
+   "nodeLimits": null,
+   "parsed": true
+  }
+ ]
+}

@@ -38,13 +38,21 @@ Issues = "https://github.com/Maggy-Studio/loenn-mcp/issues"
 [project.scripts]
 loenn-mcp = "loenn_mcp.server:main"
 pcgscene = "loenn_mcp.cli:main"
+loenn-json = "loenn_mcp.json_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["loenn_mcp"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"js/index.js" = "loenn_mcp/js/index.js"
+"js/package.json" = "loenn_mcp/js/package.json"
+"js/bin/loenn-author.js" = "loenn_mcp/js/bin/loenn-author.js"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "loenn_mcp/",
+    "js/",
+    "THIRD_PARTY_NOTICES.md",
     "README.md",
     "LICENSE",
     "pyproject.toml",

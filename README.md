@@ -15,6 +15,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 - [Features](#features)
 - [Installation & setup](#installation--setup)
+- [JSON round-trip & authoring](#json-round-trip--authoring)
 - [`pcgscene` CLI](#pcgscene-cli)
 - [Procedural generation](#procedural-generation)
 - [Image-to-map conversion](#image-to-map-conversion)
@@ -28,7 +29,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 ## Features
 
-**83 MCP tools** for complete map manipulation, plus the `pcgscene` command-line tool for scripting and CI.
+**88 MCP tools** for complete map manipulation, plus the `pcgscene` command-line tool for scripting and CI.
 
 ### Core Tools
 
@@ -53,6 +54,12 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 - `clone_room` — Duplicate a room
 - `batch_add_entities` — Add multiple entities at once
 - `resize_room` — Change room dimensions
+
+**JSON & Authoring** (see [JSON round-trip & authoring](#json-round-trip--authoring))
+- `map_to_json` / `json_to_map` — Any `.bin` to typed JSON and back, byte-identical; refuses lossy writes
+- `check_authoring_json` — Resolve hand-written content: defaults filled from Lönn plugins, unknown names flagged
+- `merge_json_into_map` — Add entities/triggers/rooms to a map; dry-run diff + highlighted preview, map-wide unique IDs, placement checks, additions only
+- `run_author_script` — Run a JavaScript authoring script (`js/`, lucid-dream style) and merge its output
 
 **Decals & Effects**
 - `list_decals` / `add_decal` / `remove_decal` — Manage foreground/background decals
@@ -99,7 +106,7 @@ Works with [Everest](https://github.com/EverestAPI/Everest) mods and maps from [
 
 ### Rendering
 
-- `render_map_html` — Interactive HTML map preview with tiles, colour-coded entity markers, zoom/pan, search and a minimap
+- `render_map_html` — Interactive HTML map preview with tiles, colour-coded entity markers, zoom/pan, search and a minimap; reads a `.bin` or a typed JSON dump, and can highlight a planned merge (`overlay`)
 
 ### Procedural Generation
 
@@ -169,6 +176,150 @@ python -m loenn_mcp.preview_map Maps/01_City_A.bin g-   # filter by prefix
 ```
 
 The interactive HTML preview supports zoom, pan, room details, search, and minimap with keyboard shortcuts.
+
+---
+
+## JSON round-trip & authoring
+
+Maps can leave the binary format and come back without losing a byte, and new
+content can be written by hand or in JavaScript and merged into an existing map.
+Nothing here needs Ruby or Node at runtime; Node is only used if you run JS
+authoring scripts.
+
+### Typed JSON: `map_to_json` / `json_to_map`
+
+```text
+map_to_json("Maps/MyMod/1-City.bin")                 → Export/1-City.json
+json_to_map("Export/1-City.json", "Maps/MyMod/1-City-copy.bin")
+```
+
+Every attribute keeps its binary type, so the round trip is byte-identical:
+
+```json
+{
+  "format": "celeste-map-json", "version": 1,
+  "header": "CELESTE MAP", "package": "1-City",
+  "source": {"file": "1-City.bin", "sha256": "…", "tree_sha256": "…"},
+  "lookup": ["Map", "levels", "level", "…"],
+  "root": {"name": "Map", "children": [
+    {"name": "levels", "children": [
+      {"name": "level", "attrs": {
+        "name": ["lookup", "lvl_a-00"],
+        "x": ["i16", -40], "width": ["i32", 320], "dark": ["bool", false],
+        "music": ["string", "event:/music/lvl1/main"], "alpha": ["f32", 0.3]},
+       "children": [{"name": "solids", "attrs": {"innerText": ["rle", "0000…"]}}]}]}]}
+}
+```
+
+- **Types:** `bool`, `u8`, `i16`, `i32`, `f32`, `lookup` (string-table string),
+  `string` (plain string), `rle` (run-length tile data, shown decoded).
+- **Values are what the file holds.** A room named `lvl_a-00` stays `lvl_a-00`.
+- **`lookup`** is the file's string table in file order; edits only append to it.
+  File quirks a canonical writer would not reproduce (a duplicate table entry, an
+  unusual RLE split) are kept as optional extras (`[type, value, {"key_index": 12}]`).
+- **Refusals.** `json_to_map` writes nothing if a value does not fit its type
+  (`["u8", 300]`), if an *unedited* dump would not reproduce its source byte-for-byte
+  (checked with `source.sha256`), or if the output would not read back as the same
+  map. Writes are atomic (temp file + replace) with rolling `.bak` copies.
+- Hand-written documents may skip `lookup`/`source` and give bare values
+  (`"x": 8`); those get the type Celeste's own packer would pick.
+
+### Authoring JSON
+
+A looser format for content you write yourself. Only names and positions are needed:
+
+```json
+{"rooms": [
+  {"room": "a-05",
+   "entities": [{"name": "strawberry", "x": 120, "y": 64},
+                {"name": "CEL/GreenBerry", "x": 200, "y": 40}],
+   "triggers": [{"name": "CEL/PinkPlatBerryCollectTrigger", "x": 0, "y": 0,
+                 "width": 16, "height": 184}]},
+  {"room": "a-99", "x": 0, "y": 2400, "width": 320, "height": 184,
+   "solids": "1111…\n1000…", "attrs": {"dark": true},
+   "entities": [{"name": "player", "x": 24, "y": 160}]}
+]}
+```
+
+- **Defaults** come from the Lönn plugin definitions: your mod's `Loenn/`, other
+  installed mods (when the workspace is in `Celeste/Mods`), then vanilla Lönn.
+  `strawberry` above gets `winged`, `moon`, `checkpointID` and `order`.
+  `"placement": "normal_winged"` picks another placement's defaults; any other key
+  (flat or under `"data"`) sets an attribute; `"nodes": [[x, y], …]` adds nodes.
+- **Unknown names are flagged** (typos, a trigger listed as an entity, a helper that
+  isn't installed). `check_authoring_json` shows the resolved result without a map.
+- **Existing rooms are only added to.** Room attributes and tiles are accepted only
+  when creating a room (give `x`, `y`, `width`, `height`).
+- Room names match with or without `lvl_`.
+
+### Merging: `merge_json_into_map`
+
+```text
+merge_json_into_map("Maps/MyMod/1-City.bin", "plan.json")                  # dry run + preview
+merge_json_into_map("Maps/MyMod/1-City.bin", "plan.json", dry_run=false)   # write
+```
+
+- **Dry run by default.** It prints a per-room diff and renders an HTML preview
+  with every added object ringed (magenta, or red when a check failed).
+- **IDs** are unique across the whole map: new ones start above the highest ID in
+  any room, and an explicit `"id"` that is already used is refused.
+- **Placement checks** for each added object: inside the room, not inside solid
+  tiles, not in an air pocket sealed off from every room edge and spawn. The
+  existing room validators (`validate_room`, `validate_map`) run before and after,
+  and any issue the merge introduces is reported. A write with problems is refused
+  unless `allow_problems=true`; unknown names need `allow_unknown=true`.
+- **Only additions.** The output bytes are re-read and compared with the original;
+  if anything that was already there differs, nothing is written.
+
+### Authoring maps from JavaScript
+
+`js/` is a small dependency-free Node package whose API follows
+[lucid-dream](https://www.npmjs.com/package/lucid-dream) (see
+`THIRD_PARTY_NOTICES.md`). It produces authoring JSON; the Python server does all
+`.bin` writing.
+
+```js
+// add-berries.js
+const { Plan, Room, Entity, Trigger, Tiles, line } = require('loenn-mcp-author'); // or require('./js')
+
+const plan = new Plan();
+plan.room('a-05').add(Entity.Strawberry({ x: 120, y: 64 }));          // existing room
+for (const [x, y] of line(64, 96, 192, 96, 3)) plan.room('a-06').add(Entity.Strawberry({ x, y }));
+plan.room('l-07').add(Trigger('CEL/PinkPlatBerryCollectTrigger', { x: 1700, y: 300, width: 56, height: 104 }));
+
+// a new room, lucid-dream style: pixel position, size in tiles, tiles as text
+plan.addRoom(new Room([0, 2400], { name: 'a-99', size: [40, 23], fgTiles: new Tiles(`...`),
+  entities: [Entity.Player({ x: 24, y: 160 })] }));
+
+module.exports = plan;          // or: module.exports = async (api) => plan;  or: plan.emit();
+```
+
+- `Entity.Strawberry(...)` camel-cases the property to the placed name
+  (`strawberry`); namespaced names use the call form, `Entity('CEL/GreenBerry', {...})`.
+- Run it through the server (dry run, with preview):
+  `run_author_script("add-berries.js", map_path="Maps/MyMod/1-City.bin")`.
+- Or from a shell: `node js/bin/loenn-author.js add-berries.js --out plan.json`,
+  or `loenn-json author add-berries.js --map Maps/MyMod/1-City.bin [--write]`.
+- Tests: `node js/test/test.js`. Examples: `js/examples/`.
+
+### JSON-driven preview
+
+`render_map_html` takes a typed JSON dump as well as a `.bin`, and an `overlay`
+(authoring JSON) that is merged in memory only and highlighted. This is the
+viewer idea from [maddievision/celestial](https://github.com/maddievision/celestial)
+built on the existing renderer.
+
+### `loenn-json` CLI
+
+```bash
+loenn-json map2json Maps/MyMod/1-City.bin -o city.json
+loenn-json json2map city.json Maps/MyMod/1-City.bin --overwrite
+loenn-json --mod . merge Maps/MyMod/1-City.bin plan.json            # dry run
+loenn-json --mod . merge Maps/MyMod/1-City.bin plan.json --write
+loenn-json --mod . author add-berries.js --map Maps/MyMod/1-City.bin
+```
+
+More examples: `examples/authoring/`.
 
 ---
 
@@ -424,6 +575,9 @@ tools and the `anthropic` dependency were removed.
 | Variable | Default | Description |
 |---|---|---|
 | `LOENN_MCP_WORKSPACE` | Current directory | Root of your Celeste mod project. All map paths are relative to this. Path traversal is blocked. |
+| `LOENN_MCP_LOENN` | (shipped table) | A Lönn install (folder with `Lönn.exe`, or its `src/`) to read vanilla entity/trigger defaults from, instead of `loenn_mcp/data/vanilla_defs.json` |
+| `LOENN_MCP_NODE` | `node` on PATH | Node.js executable for `run_author_script` |
+| `LOENN_MCP_AUTHOR_CLI` | bundled `js/bin/loenn-author.js` | Alternative authoring CLI |
 
 ---
 
@@ -436,6 +590,20 @@ tools and the `anthropic` dependency were removed.
 - Lossless read/write: an unedited map is written back byte-for-byte (string table order, value types and RLE data are preserved), and edits only append to the string table
 - Handles all 7 value types: bool, uint8, int16, int32, float32, lookup string, raw string, RLE-encoded string
 - Recursive element tree matching Lönn/Maple format
+
+**`map_json.py`** — Typed JSON for `.bin` maps
+- Every value keeps its type; unedited dumps convert back byte-identical (verified on export)
+- Refuses writes that would not round-trip; atomic writes through `celeste_bin`
+
+**`lua_defs.py`** — Lönn plugin definitions without running Lua
+- Tokenizes plugin files and evaluates literal tables (placements, field types, node limits)
+- Catalog of the mod's own, other installed mods' and vanilla definitions (`data/vanilla_defs.json`, generated from Lönn by `tools/gen_vanilla_defs.py`)
+
+**`authoring.py`** — Authoring JSON and merges
+- Default filling, unknown-name flags, map-wide ID allocation, placement checks
+- Additions-only verification on the re-read output bytes
+
+**`js/`** — `loenn-mcp-author`, the JavaScript authoring package (Node, no dependencies)
 
 **`pcg.py`** — Procedural generation
 - Pattern extraction from rooms (size, entity density, tile motifs, gameplay tags)
@@ -484,6 +652,7 @@ tools and the `anthropic` dependency were removed.
 - Python 3.9+
 - `fastmcp >= 3.0.0`
 - `Pillow >= 9.0` (optional, for image-to-map conversion)
+- Node.js 14+ (optional, only for JavaScript authoring scripts)
 
 Install with all optional features:
 ```bash
@@ -496,4 +665,4 @@ No Celeste installation required.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Credits for lucid-dream, Lönn and maddievision/celestial: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
