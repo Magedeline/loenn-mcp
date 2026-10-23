@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Magedeline/loenn-mcp",
+  "title": "loenn-mcp",
+  "description": "Celeste map editor for AI agents: read, edit, validate, preview and generate .bin maps.",
+  "repository": {
+    "url": "https://github.com/Magedeline/loenn-mcp",
+    "source": "github"
+  },
+  "version": "7.2.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "loenn-mcp",
+      "version": "7.2.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "LOENN_MCP_WORKSPACE",
+          "description": "Root of the Celeste mod project; map paths are relative to it (default: current directory)",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

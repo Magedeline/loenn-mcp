@@ -1,5 +1,22 @@
-loenn-mcp (unreleased, branch cel-upgrades)
-==========================================
+loenn-mcp 7.2.0
+===============
+
+seleCte levels:
+  - New selecte_generate: runs seleCte's Markov-chain level generator (uv),
+    its Julia/Maple encoder and pcgscene's readiness checklist in one call.
+    output_path copies the validated .bin into the mod through the guarded
+    write (backup, protected maps, open editors) and is refused when the
+    checklist finds problems unless allow_problems is set. The level's
+    data.json, room csvs, logs and .bin stay in <state dir>/selecte/<name>.
+  - loenn_mcp/selecte.py finds the clone (SELECTE_DIR, a seleCte folder next
+    to this repository, or ~/seleCte); UV_EXE and JULIA_EXE override the
+    executables. seed and model need the patched clone (upstream has no
+    --seed and always uses pe_d5_full); the tool reports when a clone lacks
+    them. Tests run against a fake seleCte; LOENN_MCP_TEST_SELECTE=1 runs the
+    real chain.
+
+Everything below landed on the cel-upgrades branch after 7.0.0 and ships for
+the first time in this release.
 
 Phase 1 rework (7.1.0):
 

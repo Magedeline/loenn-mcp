@@ -1105,3 +1105,5 @@ No Celeste installation required.
 ## License
 
 MIT — see [LICENSE](LICENSE). Credits for lucid-dream, Lönn and maddievision/celestial: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+<!-- mcp-name: io.github.Magedeline/loenn-mcp -->
