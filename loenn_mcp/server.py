@@ -42,6 +42,7 @@ Tools (categories):
   Summer Engine:    summer_init, summer_open, summer_rooms, summer_export_room,
                     summer_import_room, summer_from_sprite_fusion
   PCG core:         pcg_generate_room
+  seleCte:          selecte_generate
 
 All tools are deterministic/procedural — no AI models, no network calls to
 LLM APIs. (The former ai_* tools were removed in v7.0.0.)
@@ -79,7 +80,7 @@ try:
     from . import image_map                  # installed package
     from . import terrain_gen                # installed package
     from . import gdep_tools                 # installed package
-    from . import safety, mapdiff, assets, sprite_fusion, editors, summer, pcg_core
+    from . import safety, mapdiff, assets, sprite_fusion, editors, summer, pcg_core, selecte
 except ImportError:
     import celeste_bin as cb                 # run directly from source
     import map_json                          # run directly from source
@@ -89,7 +90,7 @@ except ImportError:
     import image_map                         # run directly from source
     import terrain_gen                       # run directly from source
     import gdep_tools                        # run directly from source
-    import safety, mapdiff, assets, sprite_fusion, editors, summer, pcg_core
+    import safety, mapdiff, assets, sprite_fusion, editors, summer, pcg_core, selecte
 
 WORKSPACE = Path(os.environ.get("LOENN_MCP_WORKSPACE", ".")).resolve()
 
@@ -109,6 +110,7 @@ mcp = FastMCP(
         "Gray-box rooms painted in Sprite Fusion come in with sf_import (tileset from sf_make_tileset); "
         "rooms painted as Summer Engine scenes come in with summer_export_room (summer_init, summer_open). "
         "pcg_generate_room makes a reach-checked gray-box room with the shared C# PCG core. "
+        "selecte_generate makes a whole level with seleCte's Markov model (needs its clone, uv and Julia). "
         "Game: game_teleport, game_reload_map, game_play_tas need Celeste running with Everest debug mode."
     ),
 )
@@ -6551,6 +6553,81 @@ def pcg_generate_room(map_path: str, room: str, exits: str = "left:16:4,right:16
     conv = pcg_core.to_conversion(doc)
     return _import_conversion(conv, f"celpcg seed {seed}", map_path, room, x, y, replace, output_path,
                               dry_run, False, allow_problems)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SELECTE LEVELS (rooms sampled from a Markov model of the vanilla maps, encoded by Julia)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tool()
+def selecte_generate(name: str, nb_rooms: int = 7, proba: float = 0.3, width: int = 22, height: int = 14,
+                     seed: int | None = None, tries_limit: int = 4, reset_skeleton: bool = False, model: str = "",
+                     output_path: str = "", allow_problems: bool = False, work_dir: str = "",
+                     timeout: int = 900) -> str:
+    """Generate a whole level with seleCte (rooms sampled from a Markov model of the vanilla maps), encode it with Julia and validate the .bin.
+
+    Runs seleCte's generator (uv), its Julia encoder and pcgscene's readiness checklist in one call. The level's
+    data.json, room csvs, logs and .bin land in <state dir>/selecte/<name>; output_path also copies the .bin into
+    the mod through the guarded write. 22x14 rooms take seconds, 40x23 (one screen) minutes per room.
+
+    Args:
+        name: Level name: the .bin file stem and the work folder (letters, digits, - and _)
+        nb_rooms: Number of rooms
+        proba: Layout shape: 0 is a straight corridor, values near 1 a labyrinth
+        width: Room width in tiles (22 is quick, 40 = one screen but slow)
+        height: Room height in tiles (14 is quick, 23 = one screen)
+        seed: Seed for reproducible runs (needs the patched seleCte clone)
+        tries_limit: Resample attempts per room before it is kept as it is
+        reset_skeleton: Redraw the whole layout when a room never comes out playable
+        model: Probability-estimation dictionary (file stem in seleCte's probability_estimation_dicts); default pe_d5_full
+        output_path: Also copy the validated .bin to this map path in the workspace (backup, protected maps, open editors apply)
+        allow_problems: Copy to output_path even when the checklist reports problems
+        work_dir: Folder for the level's files; default <state dir>/selecte/<name>
+        timeout: Seconds allowed for each of the two steps
+    """
+    out = None
+    if output_path:
+        try:
+            out = _resolve(output_path)
+        except ValueError as exc:
+            return f"Not generated: {exc}"
+        if out.suffix.lower() != ".bin":
+            return "Not generated: output_path must be a .bin map path"
+    try:
+        res = selecte.run_level(name, nb_rooms, proba, width, height, seed, tries_limit, reset_skeleton, model,
+                                Path(work_dir) if work_dir else None, timeout)
+    except selecte.SelecteError as exc:
+        return f"Not generated: {exc}"
+    sm = res.summary
+    lines = [f"seleCte level '{name}': {res.rooms} rooms, {width}x{height} tiles, proba {proba}, "
+             f"seed {seed if seed is not None else 'random'}, model {res.model}, tries {tries_limit}",
+             f"  generated in {res.gen_seconds:.1f} s: {res.level_dir} (data.json, room_<n>.csv, generate.log)",
+             f"  encoded in {res.enc_seconds:.1f} s: {res.bin_path} ({res.bin_path.stat().st_size} bytes)"]
+    if sm.unplayable:
+        lines.append(f"  seleCte kept {len(sm.unplayable)} room(s) it could not make playable: "
+                     f"{', '.join(sm.unplayable)} (more tries_limit, or reset_skeleton=true)")
+    if sm.skeleton_redraws:
+        lines.append(f"  layout redrawn {sm.skeleton_redraws} time(s)")
+    v = res.validation
+    verdict = "OK" if v["ok"] else f"{len(v['problems'])} problem(s)"
+    lines.append(f"Validation: {verdict}, {v['rooms']} rooms, {len(v['warnings'])} warning(s)")
+    lines += [f"  problem {p['room']} ({p['kind']}): {p['message']}" for p in v["problems"]]
+    lines += [f"  warning {w['room']} ({w['kind']}): {w['message']}" for w in v["warnings"][:10]]
+    if out is not None:
+        if v["ok"] or allow_problems:
+            try:
+                _save_bytes(out, res.bin_path.read_bytes())
+            except (safety.WriteBlocked, ValueError) as exc:
+                lines.append(f"Not copied to {_rel(out)}: {exc}")
+            else:
+                lines.append(f"Copied to {_rel(out)}. Everest registers a new .bin only after a game restart; "
+                             f"then game_teleport to room_1.")
+        else:
+            lines.append(f"Not copied to {_rel(out)}: the checklist reported problems (allow_problems=true "
+                         "copies anyway).")
+    lines.append("seleCte's own playability check ignores gravity and dashes: prove rooms with game_play_tas "
+                 "before shipping.")
+    return "\n".join(lines)
 
 
 # Hide the extra tools unless asked for (LOENN_MCP_TOOLS=all).
