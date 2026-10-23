@@ -48,32 +48,40 @@ jobs:
 
   registry:
     name: Publish to the MCP Registry
-    needs: publish
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # GitHub OIDC proves the io.github.Magedeline namespace
-      contents: read
+      contents: write   # attaches the .mcpb bundle to the release
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set server.json version from the release tag
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the MCPB bundle (uv runtime; the registry entry needs no PyPI release)
+        id: bundle
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          jq --arg v "$VERSION" '.version = $v | .packages[].version = $v' server.json > server.tmp
+          python tools/build_mcpb.py --version "$VERSION" --out "dist/loenn-mcp-$VERSION.mcpb" | tee build.log
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(awk '/^sha256/ {print $2}' build.log)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the bundle to the release
+        run: gh release upload "$GITHUB_REF_NAME" "dist/loenn-mcp-${{ steps.bundle.outputs.version }}.mcpb" --clobber
+
+      - name: Point server.json at the attached bundle
+        run: |
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/loenn-mcp-${{ steps.bundle.outputs.version }}.mcpb"
+          jq --arg v "${{ steps.bundle.outputs.version }}" --arg url "$URL" --arg sha "${{ steps.bundle.outputs.sha }}" \
+             '.version = $v | .packages[0].identifier = $url | .packages[0].fileSha256 = $sha' server.json > server.tmp
           mv server.tmp server.json
           cat server.json
-
-      - name: Wait for PyPI to serve the release
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          for i in $(seq 1 30); do
-            if curl -fsS "https://pypi.org/pypi/loenn-mcp/$VERSION/json" > /dev/null; then
-              echo "loenn-mcp $VERSION is on PyPI"; exit 0
-            fi
-            echo "not yet ($i)"; sleep 10
-          done
-          echo "loenn-mcp $VERSION never appeared on PyPI"; exit 1
 
       - name: Install mcp-publisher
         run: |

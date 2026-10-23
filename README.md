@@ -546,6 +546,16 @@ cd loenn-mcp
 pip install -e .
 ```
 
+### Install the MCPB bundle (no PyPI, no Python setup)
+
+Every release attaches `loenn-mcp-<version>.mcpb`, a bundle for hosts that support
+[MCPB](https://github.com/anthropics/mcpb), such as Claude Desktop. It uses the `uv` runtime: the host runs
+`uv run` on the bundle, and uv installs Python and the dependencies by itself, so only
+[uv](https://docs.astral.sh/uv/) has to be on the machine. Download the bundle from the
+[releases page](https://github.com/Magedeline/loenn-mcp/releases), open it in the host, and point its
+"Celeste mod folder" setting at your mod. `python tools/build_mcpb.py` builds the same bundle from a checkout
+(sources in `mcpb/`), and `server.json` lists it for the MCP Registry as `io.github.Magedeline/loenn-mcp`.
+
 ### Connect to Claude Desktop
 Add to `claude_desktop_config.json`:
 ```json

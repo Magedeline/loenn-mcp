@@ -10,11 +10,10 @@
   "version": "7.2.0",
   "packages": [
     {
-      "registryType": "pypi",
-      "registryBaseUrl": "https://pypi.org",
-      "identifier": "loenn-mcp",
+      "registryType": "mcpb",
+      "identifier": "https://github.com/Magedeline/loenn-mcp/releases/download/v7.2.0/loenn-mcp-7.2.0.mcpb",
+      "fileSha256": "99aa5f3cd18d0bcc9fc9016683aa7a10b29beaa868161cb40f45f640fe2a90f5",
       "version": "7.2.0",
-      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       },

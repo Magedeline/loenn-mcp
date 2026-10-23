@@ -1,0 +1,17 @@
+# Dependencies for the loenn-mcp MCPB bundle (uv runtime). The host runs
+# `uv run --directory <bundle> src/server.py`; uv installs these into a
+# private environment. The loenn_mcp package itself is imported from the
+# bundle folder by src/server.py, so nothing here is built or installed.
+# tools/build_mcpb.py copies this file into the bundle with the version set.
+[project]
+name = "loenn-mcp-bundle"
+version = "7.2.0"
+description = "loenn-mcp as an MCPB bundle"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=3.4.0,<4",
+    "Pillow>=9.0",
+]
+
+[tool.uv]
+package = false

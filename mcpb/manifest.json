@@ -1,0 +1,45 @@
+{
+  "manifest_version": "0.4",
+  "name": "loenn-mcp",
+  "display_name": "loenn-mcp (Celeste map editor)",
+  "version": "7.2.0",
+  "description": "Celeste map editor for AI agents: read, edit, validate, preview and generate .bin maps.",
+  "long_description": "Reads and writes Celeste .bin maps directly (lossless), with timestamped backups on every write, semantic diffs, Lönn/Rysy launching, Sprite Fusion and Summer Engine gray-box rooms, a shared C# PCG core, seleCte whole-level generation, and a live link to a running Everest game. Needs uv on the machine: the host installs Python and the dependencies from pyproject.toml.",
+  "author": {
+    "name": "Maggy Studio",
+    "url": "https://github.com/Magedeline/loenn-mcp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Magedeline/loenn-mcp"
+  },
+  "homepage": "https://github.com/Magedeline/loenn-mcp",
+  "documentation": "https://github.com/Magedeline/loenn-mcp#readme",
+  "server": {
+    "type": "uv",
+    "entry_point": "src/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "src/server.py"],
+      "env": {
+        "LOENN_MCP_WORKSPACE": "${user_config.workspace}"
+      }
+    }
+  },
+  "user_config": {
+    "workspace": {
+      "type": "directory",
+      "title": "Celeste mod folder",
+      "description": "Root of the Everest mod to edit (for example Celeste/Mods/MyMap). Map paths in every tool are relative to it.",
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["win32", "darwin", "linux"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  },
+  "keywords": ["celeste", "loenn", "everest", "map-editor", "pcg", "game-modding"],
+  "license": "MIT"
+}

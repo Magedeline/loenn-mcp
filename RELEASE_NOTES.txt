@@ -15,6 +15,13 @@ seleCte levels:
     them. Tests run against a fake seleCte; LOENN_MCP_TEST_SELECTE=1 runs the
     real chain.
 
+Distribution:
+  - loenn-mcp-<version>.mcpb on every GitHub release: an MCPB bundle with the
+    uv runtime (the host installs Python and the dependencies itself; no PyPI
+    release needed). tools/build_mcpb.py builds it from mcpb/; server.json
+    lists it for the MCP Registry, and the release workflow rebuilds, attaches
+    and publishes it.
+
 Everything below landed on the cel-upgrades branch after 7.0.0 and ships for
 the first time in this release.
 
