@@ -534,9 +534,12 @@ found problems (`allow_problems=true` copies anyway).
 
 ## Installation & Setup
 
-### Install from PyPI
+### Install the Python package
+
+The PyPI package `loenn-mcp` has not been updated since 5.2.0, so `pip install loenn-mcp` gets an old version.
+Install the wheel attached to the latest [release](https://github.com/Magedeline/loenn-mcp/releases) instead:
 ```bash
-pip install loenn-mcp
+pip install https://github.com/Magedeline/loenn-mcp/releases/download/v7.2.0/loenn_mcp-7.2.0-py3-none-any.whl
 ```
 
 Or from source:
